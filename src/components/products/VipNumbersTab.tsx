@@ -95,11 +95,11 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
           <TableHeader>
             <TableRow>
               <TableHead>Number</TableHead>
-              <TableHead>Price (₹)</TableHead>
-              <TableHead>Status</TableHead>
               <TableHead>Category</TableHead>
               <TableHead>Original Price (₹)</TableHead>
               <TableHead>Discount (%)</TableHead>
+              <TableHead>Price (₹)</TableHead>
+              <TableHead>Status</TableHead>
               <TableHead>Created At</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -108,18 +108,18 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
             {vipNumbers.map((product) => (
               <TableRow key={product.id}>
                 <TableCell className="font-medium">{product.number}</TableCell>
+                <TableCell>{categoryMap[product.categorySlug] || product.categorySlug}</TableCell>
+                <TableCell>{product.originalPrice?.toLocaleString() || 'N/A'}</TableCell>
+                <TableCell>{product.discount ? `${product.discount.toLocaleString()}%` : 'N/A'}</TableCell>
                 <TableCell>{product.price.toLocaleString()}</TableCell>
                 <TableCell>
                   <Badge 
                     variant={product.status === 'available' ? 'default' : product.status === 'sold' ? 'destructive' : 'secondary'}
                     className="capitalize"
-                  >
+                    >
                     {product.status}
                   </Badge>
                 </TableCell>
-                <TableCell>{categoryMap[product.categorySlug] || product.categorySlug}</TableCell>
-                <TableCell>{product.originalPrice?.toLocaleString() || 'N/A'}</TableCell>
-                <TableCell>{product.discount ? `${product.discount}%` : 'N/A'}</TableCell>
                 <TableCell>
                   {product.createdAt instanceof Timestamp 
                     ? format(product.createdAt.toDate(), 'PPp') 

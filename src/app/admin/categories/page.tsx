@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,18 +11,95 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { MoreHorizontal, Edit, Trash2, PlusCircle, FolderKanban, PackageSearch } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { db } from '@/lib/firebase';
-import { collection, query, orderBy, onSnapshot, Timestamp } from 'firebase/firestore';
-import type { Category } from '@/types';
+import { collection, query, orderBy, onSnapshot, Timestamp, doc, deleteDoc } from 'firebase/firestore';
+import type { Category, CategoryFormData } from '@/types';
 import { format } from 'date-fns';
+import { CategoryDialog } from '@/components/categories/CategoryDialog';
+import { useToast } from '@/hooks/use-toast';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export default function CategoriesPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [categoryToDelete, setCategoryToDelete] = useState<Category | null>(null);
 
-  useEffect(() => {
+  const { toast } = useToast();
+
+  const handleAddNewCategory = () => {
+    setEditingCategory(null);
+    setIsDialogOpen(true);
+  };
+
+  const handleEditCategory = (category: Category) => {
+    setEditingCategory(category);
+    setIsDialogOpen(true);
+  };
+
+  const openDeleteConfirmDialog = (category: Category) => {
+    setCategoryToDelete(category);
+  };
+
+  const closeDeleteConfirmDialog = () => {
+    setCategoryToDelete(null);
+  };
+
+  const handleDeleteCategory = async () => {
+    if (!categoryToDelete || !categoryToDelete.id) return;
+    setIsDeleting(true);
+    try {
+      // TODO: In a real app, check if this category is being used by any products (vipNumbers or numberPacks)
+      // const vipNumbersQuery = query(collection(db, "vipNumbers"), where("categorySlug", "==", categoryToDelete.slug));
+      // const numberPacksQuery = query(collection(db, "numberPacks"), where("categorySlug", "==", categoryToDelete.slug));
+      // const vipNumbersSnapshot = await getDocs(vipNumbersQuery);
+      // const numberPacksSnapshot = await getDocs(numberPacksQuery);
+      // if (!vipNumbersSnapshot.empty || !numberPacksSnapshot.empty) {
+      //   toast({
+      //     title: "Deletion Failed",
+      //     description: "This category is currently in use by one or more products and cannot be deleted.",
+      //     variant: "destructive",
+      //   });
+      //   setIsDeleting(false);
+      //   closeDeleteConfirmDialog();
+      //   return;
+      // }
+
+      await deleteDoc(doc(db, 'categories', categoryToDelete.id));
+      toast({
+        title: 'Category Deleted',
+        description: `Category "${categoryToDelete.title}" has been successfully deleted.`,
+      });
+    } catch (error) {
+      console.error("Error deleting category: ", error);
+      toast({
+        title: 'Deletion Failed',
+        description: (error as Error).message || 'Could not delete the category.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeleting(false);
+      closeDeleteConfirmDialog();
+    }
+  };
+  
+  const fetchCategories = useCallback(() => {
     setIsLoading(true);
     // IMPORTANT: For correct numerical sorting, ensure the 'order' field 
     // in your Firestore 'categories' documents is stored as a NUMBER type.
+    // This query also requires a composite index in Firestore. 
+    // Firebase usually provides a link in the console error to create it.
+    // The index typically involves: `categories` collection, `order` (ASC), `createdAt` (DESC).
     const q = query(collection(db, 'categories'), orderBy('order', 'asc'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, 
       (querySnapshot) => {
@@ -35,11 +112,21 @@ export default function CategoriesPage() {
       },
       (error) => {
         console.error("Error fetching categories: ", error);
+        toast({
+          title: 'Error Fetching Categories',
+          description: (error as Error).message || 'Could not load categories.',
+          variant: 'destructive',
+        });
         setIsLoading(false);
       }
     );
+    return unsubscribe;
+  }, [toast]);
+
+  useEffect(() => {
+    const unsubscribe = fetchCategories();
     return () => unsubscribe();
-  }, []);
+  }, [fetchCategories]);
 
   return (
     <>
@@ -47,7 +134,7 @@ export default function CategoriesPage() {
         title="Categories Management"
         description="Manage product categories for your shop."
         actions={
-          <Button disabled className="bg-primary hover:bg-primary/90">
+          <Button onClick={handleAddNewCategory} className="bg-primary hover:bg-primary/90">
             <PlusCircle className="mr-2 h-4 w-4" /> Add New Category
           </Button>
         }
@@ -59,8 +146,9 @@ export default function CategoriesPage() {
             <span>Categories List</span>
           </CardTitle>
           <CardDescription>
-            View and manage categories for VIP numbers and number packs. 
+            View, add, edit, and delete categories for VIP numbers and number packs.
             Note: Ensure 'order' field in Firestore is a Number for correct sorting.
+            A Firestore index is required for ordering by 'order' and 'createdAt'.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -109,21 +197,23 @@ export default function CategoriesPage() {
                     <TableCell>
                       {category.createdAt instanceof Timestamp
                         ? format(category.createdAt.toDate(), 'PPp')
-                        : 'N/A'}
+                        : typeof category.createdAt === 'string' 
+                          ? category.createdAt // Fallback if it's a string for some reason
+                          : 'N/A'}
                     </TableCell>
                     <TableCell className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0" disabled>
+                          <Button variant="ghost" className="h-8 w-8 p-0">
                             <span className="sr-only">Open menu</span>
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem disabled>
+                          <DropdownMenuItem onClick={() => handleEditCategory(category)}>
                             <Edit className="mr-2 h-4 w-4" /> Edit
                           </DropdownMenuItem>
-                          <DropdownMenuItem disabled className="text-destructive focus:text-destructive focus:bg-destructive/10">
+                          <DropdownMenuItem onClick={() => openDeleteConfirmDialog(category)} className="text-destructive focus:text-destructive focus:bg-destructive/10">
                             <Trash2 className="mr-2 h-4 w-4" /> Delete
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -136,6 +226,41 @@ export default function CategoriesPage() {
           )}
         </CardContent>
       </Card>
+
+      {isDialogOpen && (
+        <CategoryDialog
+            isOpen={isDialogOpen}
+            onClose={() => {
+                setIsDialogOpen(false);
+                setEditingCategory(null);
+            }}
+            category={editingCategory}
+            onSuccess={() => fetchCategories()} // Re-fetch or update local state
+        />
+      )}
+
+      {categoryToDelete && (
+        <AlertDialog open={!!categoryToDelete} onOpenChange={(open) => !open && closeDeleteConfirmDialog()}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. This will permanently delete the category
+                "{categoryToDelete.title}".
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={closeDeleteConfirmDialog} disabled={isDeleting}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction onClick={handleDeleteCategory} disabled={isDeleting} className="bg-destructive hover:bg-destructive/90">
+                {isDeleting ? "Deleting..." : "Yes, delete category"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </>
   );
 }
+
