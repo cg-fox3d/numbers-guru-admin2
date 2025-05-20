@@ -15,22 +15,26 @@ interface VipNumberFormProps {
   onSubmit: (data: VipNumberFormData) => Promise<void>;
   isSubmitting: boolean;
   onClose?: () => void;
-  // categories prop is removed
 }
 
 export function VipNumberForm({ form, onSubmit, isSubmitting, onClose }: VipNumberFormProps) {
-  const { watch, setValue } = form;
-  const originalPrice = watch('originalPrice');
-  const discount = watch('discount');
+  const { watch, setValue, getValues } = form;
 
   const handleCalculatePrice = () => {
-    const op = parseFloat(String(originalPrice || 0));
-    const d = parseFloat(String(discount || 0));
+    const originalPriceStr = String(getValues('originalPrice') || '');
+    const discountStr = String(getValues('discount') || '');
+
+    const op = parseFloat(originalPriceStr);
+    const d = parseFloat(discountStr);
+
     if (!isNaN(op) && !isNaN(d) && d >= 0 && d <= 100) {
       const calculatedPrice = op - (op * d / 100);
       setValue('price', parseFloat(calculatedPrice.toFixed(2)), { shouldValidate: true });
     } else if (!isNaN(op)) {
       setValue('price', op, { shouldValidate: true });
+    } else {
+       // If original price is not a valid number, clear selling price or set to 0
+       setValue('price', 0, { shouldValidate: true });
     }
   };
 
@@ -59,9 +63,13 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose }: VipNumb
               <FormItem>
                 <FormLabel>Original Price (₹)</FormLabel>
                 <FormControl>
-                  <Input type="number" placeholder="e.g., 60000" {...field} 
-                   onChange={e => field.onChange(parseFloat(e.target.value) || undefined)} // Allow undefined for optional
-                   onBlur={handleCalculatePrice}
+                  <Input 
+                    type="number" 
+                    placeholder="e.g., 60000" 
+                    {...field}
+                    onChange={e => field.onChange(e.target.value)} // Pass string value
+                    onBlur={handleCalculatePrice}
+                    value={field.value === null ? '' : field.value} // Ensure value is not null for input
                   />
                 </FormControl>
                 <FormMessage />
@@ -75,11 +83,15 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose }: VipNumb
               <FormItem>
                 <FormLabel>Discount (%)</FormLabel>
                 <FormControl>
-                  <Input type="number" placeholder="e.g., 10" {...field} 
-                  onChange={e => field.onChange(parseFloat(e.target.value) || undefined)} // Allow undefined for optional
-                  onBlur={handleCalculatePrice}
-                  min="0"
-                  max="100"
+                  <Input 
+                    type="number" 
+                    placeholder="e.g., 10" 
+                    {...field}
+                    onChange={e => field.onChange(e.target.value)} // Pass string value
+                    onBlur={handleCalculatePrice}
+                    min="0"
+                    max="100"
+                    value={field.value === null ? '' : field.value} // Ensure value is not null for input
                   />
                 </FormControl>
                 <FormDescription>0 to 100</FormDescription>
@@ -94,8 +106,11 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose }: VipNumb
               <FormItem>
                 <FormLabel>Selling Price (₹)</FormLabel>
                 <FormControl>
-                  <Input type="number" placeholder="Auto-calculated or manual" {...field} 
-                   onChange={e => field.onChange(parseFloat(e.target.value) || 0)}
+                  <Input 
+                    type="number" 
+                    placeholder="Auto-calculated or manual" 
+                    {...field} 
+                    onChange={e => field.onChange(e.target.value)} // Pass string value
                   />
                 </FormControl>
                 <FormMessage />
@@ -240,5 +255,3 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose }: VipNumb
     </Form>
   );
 }
-
-    
