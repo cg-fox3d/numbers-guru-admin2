@@ -1,3 +1,4 @@
+
 "use client"
 
 import * as React from "react"
@@ -8,6 +9,7 @@ import { PanelLeft } from "lucide-react"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import type { ButtonProps } from "@/components/ui/button" // Import ButtonProps for better typing
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { Sheet, SheetContent } from "@/components/ui/sheet"
@@ -261,9 +263,9 @@ Sidebar.displayName = "Sidebar"
 
 const SidebarTrigger = React.forwardRef<
   React.ElementRef<typeof Button>,
-  React.ComponentProps<typeof Button>
->(({ className, onClick, ...props }, ref) => {
-  const { toggleSidebar } = useSidebar()
+  ButtonProps // Use ButtonProps which includes asChild and children
+>(({ className, onClick, children, asChild, ...props }, ref) => { // Explicitly destructure asChild and children
+  const { toggleSidebar } = useSidebar();
 
   return (
     <Button
@@ -273,16 +275,23 @@ const SidebarTrigger = React.forwardRef<
       size="icon"
       className={cn("h-7 w-7", className)}
       onClick={(event) => {
-        onClick?.(event)
-        toggleSidebar()
+        onClick?.(event);
+        toggleSidebar();
       }}
-      {...props}
+      asChild={asChild} // Pass asChild to the underlying Button
+      {...props} // Spread other props (e.g., data attributes)
     >
-      <PanelLeft />
-      <span className="sr-only">Toggle Sidebar</span>
+      {/* If asChild is true, render the children passed to SidebarTrigger.
+          Otherwise, render the default PanelLeft icon and sr-only span. */}
+      {asChild ? children : (
+        <>
+          <PanelLeft />
+          <span className="sr-only">Toggle Sidebar</span>
+        </>
+      )}
     </Button>
-  )
-})
+  );
+});
 SidebarTrigger.displayName = "SidebarTrigger"
 
 const SidebarRail = React.forwardRef<
@@ -761,3 +770,5 @@ export {
   SidebarTrigger,
   useSidebar,
 }
+
+    
