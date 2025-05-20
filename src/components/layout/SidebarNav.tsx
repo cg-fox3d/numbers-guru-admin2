@@ -40,9 +40,8 @@ export function SidebarNav() {
       <SidebarMenu className="flex-1 px-2">
         {navItems.map((item) => (
           <SidebarMenuItem key={item.href}>
-            <Link href={item.href} passHref legacyBehavior>
+            <Link href={item.href}>
               <SidebarMenuButton
-                asChild
                 isActive={pathname === item.href || (item.href !== '/admin/dashboard' && pathname.startsWith(item.href))}
                 className={cn(
                   'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
@@ -51,10 +50,8 @@ export function SidebarNav() {
                 )}
                 tooltip={{ children: item.label, className: "bg-popover text-popover-foreground border shadow-md" }}
               >
-                <a>
-                  <item.icon />
-                  <span>{item.label}</span>
-                </a>
+                <item.icon />
+                <span>{item.label}</span>
               </SidebarMenuButton>
             </Link>
           </SidebarMenuItem>
@@ -62,12 +59,10 @@ export function SidebarNav() {
       </SidebarMenu>
        <SidebarMenu className="mt-auto px-2 pb-2">
         <SidebarMenuItem>
-           <Link href="https://numbersguru.com" passHref legacyBehavior target="_blank" rel="noopener noreferrer">
-            <SidebarMenuButton asChild className="text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" tooltip={{children: "Main Site", className: "bg-popover text-popover-foreground border shadow-md"}}>
-              <a>
-                <ExternalLink />
-                <span>Main Site</span>
-              </a>
+           <Link href="https://numbersguru.com" target="_blank" rel="noopener noreferrer">
+            <SidebarMenuButton className="text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" tooltip={{children: "Main Site", className: "bg-popover text-popover-foreground border shadow-md"}}>
+              <ExternalLink />
+              <span>Main Site</span>
             </SidebarMenuButton>
           </Link>
         </SidebarMenuItem>
