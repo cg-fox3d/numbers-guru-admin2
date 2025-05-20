@@ -50,8 +50,8 @@ export function DashboardOverview() {
         const ordersCol = collection(db, 'orders');
         // const usersCol = collection(db, 'users'); // For new customers, if synced
 
-        const activeVipNumbersQuery = query(vipNumbersCol, where('status', '==', 'Available'));
-        const activeNumberPacksQuery = query(numberPacksCol, where('status', '==', 'Available'));
+        const activeVipNumbersQuery = query(vipNumbersCol, where('status', '==', 'available'));
+        const activeNumberPacksQuery = query(numberPacksCol, where('status', '==', 'available'));
         
         const vipNumbersSnapshot = await getCountFromServer(activeVipNumbersQuery);
         const numberPacksSnapshot = await getCountFromServer(activeNumberPacksQuery);

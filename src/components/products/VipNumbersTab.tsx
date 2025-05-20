@@ -12,13 +12,20 @@ import { MoreHorizontal, Edit, Trash2, PackageSearch } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { format } from 'date-fns';
+import { Badge } from '@/components/ui/badge';
 
-export function VipNumbersTab() {
+interface VipNumbersTabProps {
+  categoryMap: Record<string, string>;
+}
+
+export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
   const [vipNumbers, setVipNumbers] = useState<VipNumber[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     setIsLoading(true);
+    // Ensure 'createdAt' field (Timestamp) exists in your vipNumbers documents for ordering.
+    // If not, remove orderBy clause or order by a different field.
     const q = query(collection(db, 'vipNumbers'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, 
       (querySnapshot) => {
@@ -32,7 +39,6 @@ export function VipNumbersTab() {
       (error) => {
         console.error("Error fetching VIP numbers: ", error);
         setIsLoading(false);
-        // Handle error display appropriately
       }
     );
     return () => unsubscribe();
@@ -47,13 +53,13 @@ export function VipNumbersTab() {
         </CardHeader>
         <CardContent>
           <div className="space-y-2">
-            {[...Array(3)].map((_, i) => (
+            {[...Array(5)].map((_, i) => (
               <div key={i} className="flex items-center justify-between p-2 border rounded-md">
-                <div className="space-y-1">
-                  <Skeleton className="h-5 w-32" />
-                  <Skeleton className="h-4 w-24" />
+                <div className="flex-1 space-y-1">
+                  <Skeleton className="h-5 w-1/3" />
+                  <Skeleton className="h-4 w-1/4" />
                 </div>
-                <Skeleton className="h-8 w-8" />
+                <Skeleton className="h-8 w-8 ml-4" />
               </div>
             ))}
           </div>
@@ -92,7 +98,8 @@ export function VipNumbersTab() {
               <TableHead>Price (₹)</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Category</TableHead>
-              <TableHead>Description</TableHead>
+              <TableHead>Original Price (₹)</TableHead>
+              <TableHead>Discount (%)</TableHead>
               <TableHead>Created At</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -102,9 +109,17 @@ export function VipNumbersTab() {
               <TableRow key={product.id}>
                 <TableCell className="font-medium">{product.number}</TableCell>
                 <TableCell>{product.price.toLocaleString()}</TableCell>
-                <TableCell>{product.status}</TableCell>
-                <TableCell>{product.categoryName || product.categoryId || 'N/A'}</TableCell>
-                <TableCell className="max-w-xs truncate">{product.description || 'N/A'}</TableCell>
+                <TableCell>
+                  <Badge 
+                    variant={product.status === 'available' ? 'default' : product.status === 'sold' ? 'destructive' : 'secondary'}
+                    className="capitalize"
+                  >
+                    {product.status}
+                  </Badge>
+                </TableCell>
+                <TableCell>{categoryMap[product.categorySlug] || product.categorySlug}</TableCell>
+                <TableCell>{product.originalPrice?.toLocaleString() || 'N/A'}</TableCell>
+                <TableCell>{product.discount ? `${product.discount}%` : 'N/A'}</TableCell>
                 <TableCell>
                   {product.createdAt instanceof Timestamp 
                     ? format(product.createdAt.toDate(), 'PPp') 

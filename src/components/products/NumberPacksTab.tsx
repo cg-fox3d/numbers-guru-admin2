@@ -12,13 +12,20 @@ import { MoreHorizontal, Edit, Trash2, PackageSearch } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { format } from 'date-fns';
+import { Badge } from '@/components/ui/badge';
 
-export function NumberPacksTab() {
+interface NumberPacksTabProps {
+  categoryMap: Record<string, string>;
+}
+
+export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
   const [numberPacks, setNumberPacks] = useState<NumberPack[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     setIsLoading(true);
+    // Ensure 'createdAt' field (Timestamp) exists in your numberPacks documents for ordering.
+    // If not, remove orderBy clause or order by a different field.
     const q = query(collection(db, 'numberPacks'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, 
       (querySnapshot) => {
@@ -32,7 +39,6 @@ export function NumberPacksTab() {
       (error) => {
         console.error("Error fetching number packs: ", error);
         setIsLoading(false);
-        // Handle error display appropriately
       }
     );
     return () => unsubscribe();
@@ -49,11 +55,11 @@ export function NumberPacksTab() {
           <div className="space-y-2">
             {[...Array(3)].map((_, i) => (
               <div key={i} className="flex items-center justify-between p-2 border rounded-md">
-                <div className="space-y-1">
-                  <Skeleton className="h-5 w-32" />
-                  <Skeleton className="h-4 w-24" />
+                <div className="flex-1 space-y-1">
+                  <Skeleton className="h-5 w-1/3" />
+                  <Skeleton className="h-4 w-1/4" />
                 </div>
-                <Skeleton className="h-8 w-8" />
+                <Skeleton className="h-8 w-8 ml-4" />
               </div>
             ))}
           </div>
@@ -101,13 +107,20 @@ export function NumberPacksTab() {
           <TableBody>
             {numberPacks.map((pack) => (
               <TableRow key={pack.id}>
-                <TableCell className="font-medium">{pack.packName}</TableCell>
-                <TableCell>{pack.itemsCount}</TableCell>
+                <TableCell className="font-medium">{pack.name}</TableCell>
+                <TableCell>{pack.numbers?.length || 0}</TableCell>
                 <TableCell>{pack.packPrice.toLocaleString()}</TableCell>
-                <TableCell>{pack.status}</TableCell>
-                <TableCell>{pack.categoryName || pack.categoryId || 'N/A'}</TableCell>
+                <TableCell>
+                  <Badge 
+                    variant={pack.status === 'available' ? 'default' : 'destructive'}
+                    className="capitalize"
+                  >
+                    {pack.status}
+                  </Badge>
+                </TableCell>
+                <TableCell>{categoryMap[pack.categorySlug] || pack.categorySlug}</TableCell>
                 <TableCell className="max-w-xs truncate">{pack.description || 'N/A'}</TableCell>
-                 <TableCell>
+                <TableCell>
                   {pack.createdAt instanceof Timestamp 
                     ? format(pack.createdAt.toDate(), 'PPp') 
                     : 'N/A'}

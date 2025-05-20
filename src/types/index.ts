@@ -1,76 +1,75 @@
 
 import type { Timestamp } from 'firebase/firestore';
 
-// Old Product type, can be removed or refactored if not used elsewhere.
-// For now, commenting out to avoid conflict with new product types.
-/*
-export interface Product {
-  id: string;
-  name: string;
-  type: 'VIP Number' | 'Number Pack';
-  price: number;
-  description?: string;
-  number?: string; // For VIP Number
-  packDetails?: string; // For Number Pack
-  createdAt: Date | Timestamp; // Allow both for flexibility during transition
-}
-*/
-
 export interface Category {
   id: string;
   title: string;
   slug: string;
-  order: number;
+  order: number; // Ensure this is a number in Firestore for correct sorting
   type: 'individual' | 'pack';
   createdAt: Timestamp;
 }
 
 export interface VipNumber {
-  id: string;
+  id: string; // Firestore document ID
   number: string;
-  price: number;
-  status: string;
-  categoryId?: string; // Optional for now, can be made required
-  categoryName?: string; // Denormalized for display
-  description?: string;
-  createdAt: Timestamp;
+  price: number; // Selling price
+  originalPrice?: number; // Optional: original price before discount
+  discount?: number; // Optional: discount percentage or amount
+  status: 'available' | 'sold' | 'booked'; // Example statuses
+  categorySlug: string; 
+  // Optional fields from your structure:
+  imageHint?: string;
+  isVip?: boolean;
+  sumOfDigits?: string;
+  totalDigits?: string;
+  // Recommended for ordering:
+  createdAt: Timestamp; 
+}
+
+export interface NumberPackItem {
+  id: string; // Corresponds to a vipNumber document ID or a unique identifier for the number in the pack
+  number: string;
+  price: number; // Original price of this individual number if it were sold alone
 }
 
 export interface NumberPack {
-  id: string;
-  packName: string;
-  itemsCount: number;
-  packPrice: number;
-  status: string;
-  categoryId?: string; // Optional for now
-  categoryName?: string; // Denormalized for display
+  id: string; // Firestore document ID
+  name: string; // Pack name, e.g., "Value Family Pack"
+  numbers: NumberPackItem[]; // Array of numbers in the pack
+  packPrice: number; // Selling price of the pack
+  totalOriginalPrice?: number; // Optional: Sum of original prices of numbers in the pack
+  status: 'available' | 'sold'; // Example statuses
+  categorySlug: string;
   description?: string;
+  // Optional fields from your structure:
+  imageHint?: string;
+  isVipPack?: boolean;
+  // Recommended for ordering:
   createdAt: Timestamp;
 }
 
-// Keeping this for the customer list page in src/components/customers
 export interface Customer {
   id: string;
   name: string;
   email: string;
   phone?: string;
-  joinedDate: Date | Timestamp | string; // Allow various types from mock/Firestore
+  joinedDate: Date | Timestamp | string; 
   lastOrderDate?: Date | Timestamp | string;
 }
 
-// For the admin/customers placeholder page
 export interface AdminDisplayCustomer {
-  id: string; // UID from Auth
+  id: string; 
   email: string;
-  name?: string; // Display name
+  name?: string; 
   registeredOn: Timestamp;
-  createdAt?: Timestamp; // If synced to a 'users' collection
+  createdAt?: Timestamp; 
 }
 
 export interface AdminOrder {
-  id: string; // Firestore document ID
-  orderId: string; // Custom order ID
-  customerName: string; // Or customerId
+  id: string; 
+  orderId: string; 
+  customerName: string; 
   date: Timestamp;
   totalAmount: number;
   status: string;
@@ -79,7 +78,7 @@ export interface AdminOrder {
 
 export interface DashboardStats {
   totalRevenue: number;
-  newCustomers: number; // Placeholder, as direct Auth user count is tricky client-side
+  newCustomers: number; 
   ordersThisMonth: number;
   productsInStock: number;
 }

@@ -21,6 +21,8 @@ export default function CategoriesPage() {
 
   useEffect(() => {
     setIsLoading(true);
+    // IMPORTANT: For correct numerical sorting, ensure the 'order' field 
+    // in your Firestore 'categories' documents is stored as a NUMBER type.
     const q = query(collection(db, 'categories'), orderBy('order', 'asc'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, 
       (querySnapshot) => {
@@ -34,7 +36,6 @@ export default function CategoriesPage() {
       (error) => {
         console.error("Error fetching categories: ", error);
         setIsLoading(false);
-        // Handle error display
       }
     );
     return () => unsubscribe();
@@ -58,7 +59,8 @@ export default function CategoriesPage() {
             <span>Categories List</span>
           </CardTitle>
           <CardDescription>
-            View and manage categories for VIP numbers and number packs.
+            View and manage categories for VIP numbers and number packs. 
+            Note: Ensure 'order' field in Firestore is a Number for correct sorting.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -100,8 +102,8 @@ export default function CategoriesPage() {
                     <TableCell>{category.slug}</TableCell>
                     <TableCell>{category.order}</TableCell>
                     <TableCell>
-                      <Badge variant={category.type === 'individual' ? 'default' : 'secondary'}>
-                        {category.type === 'individual' ? 'Individual' : 'Pack'}
+                      <Badge variant={category.type === 'individual' ? 'default' : 'secondary'} className="capitalize">
+                        {category.type}
                       </Badge>
                     </TableCell>
                     <TableCell>
