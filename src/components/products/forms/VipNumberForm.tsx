@@ -8,17 +8,17 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import type { VipNumberFormData, Category } from '@/types';
+import type { VipNumberFormData } from '@/types';
 
 interface VipNumberFormProps {
   form: UseFormReturn<VipNumberFormData>;
   onSubmit: (data: VipNumberFormData) => Promise<void>;
   isSubmitting: boolean;
   onClose?: () => void;
-  categories: Category[]; // Categories of type 'individual'
+  // categories prop is removed
 }
 
-export function VipNumberForm({ form, onSubmit, isSubmitting, onClose, categories }: VipNumberFormProps) {
+export function VipNumberForm({ form, onSubmit, isSubmitting, onClose }: VipNumberFormProps) {
   const { watch, setValue } = form;
   const originalPrice = watch('originalPrice');
   const discount = watch('discount');
@@ -60,7 +60,7 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose, categorie
                 <FormLabel>Original Price (₹)</FormLabel>
                 <FormControl>
                   <Input type="number" placeholder="e.g., 60000" {...field} 
-                   onChange={e => field.onChange(parseFloat(e.target.value) || 0)}
+                   onChange={e => field.onChange(parseFloat(e.target.value) || undefined)} // Allow undefined for optional
                    onBlur={handleCalculatePrice}
                   />
                 </FormControl>
@@ -76,7 +76,7 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose, categorie
                 <FormLabel>Discount (%)</FormLabel>
                 <FormControl>
                   <Input type="number" placeholder="e.g., 10" {...field} 
-                  onChange={e => field.onChange(parseFloat(e.target.value) || 0)}
+                  onChange={e => field.onChange(parseFloat(e.target.value) || undefined)} // Allow undefined for optional
                   onBlur={handleCalculatePrice}
                   min="0"
                   max="100"
@@ -107,28 +107,16 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose, categorie
             Calculate Selling Price
         </Button>
 
-
         <FormField
           control={form.control}
           name="categorySlug"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Category</FormLabel>
-              <Select onValueChange={field.onChange} defaultValue={field.value} value={field.value || undefined}>
-                <FormControl>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select an individual category" />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  {categories.length === 0 && <SelectItem value="no-category" disabled>No 'individual' categories found</SelectItem>}
-                  {categories.map((cat) => (
-                    <SelectItem key={cat.slug} value={cat.slug}>
-                      {cat.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <FormLabel>Category Slug</FormLabel>
+              <FormControl>
+                <Input placeholder="e.g., fancy-numbers-786" {...field} />
+              </FormControl>
+              <FormDescription>Enter the exact category slug.</FormDescription>
               <FormMessage />
             </FormItem>
           )}
@@ -244,7 +232,7 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose, categorie
               Cancel
             </Button>
           )}
-          <Button type="submit" disabled={isSubmitting || categories.length === 0} className="bg-primary hover:bg-primary/90">
+          <Button type="submit" disabled={isSubmitting} className="bg-primary hover:bg-primary/90">
             {isSubmitting ? 'Saving...' : 'Save VIP Number'}
           </Button>
         </div>
@@ -252,3 +240,5 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose, categorie
     </Form>
   );
 }
+
+    

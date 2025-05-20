@@ -6,10 +6,11 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { VipNumberForm } from '@/components/products/forms/VipNumberForm';
-import type { VipNumber, VipNumberFormData, Category } from '@/types';
+import type { VipNumber, VipNumberFormData } from '@/types'; // Category type import removed
 import { vipNumberSchema } from '@/lib/schemas';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, doc, updateDoc, serverTimestamp, Timestamp, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+// Query related imports for categories are removed
 import { useToast } from '@/hooks/use-toast';
 
 interface VipNumberDialogProps {
@@ -17,10 +18,10 @@ interface VipNumberDialogProps {
   onClose: () => void;
   vipNumber?: VipNumber | null; 
   onSuccess?: () => void;
-  categories: Category[]; // Pre-fetched 'individual' categories from VipNumbersTab
+  // categories prop is removed
 }
 
-export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess, categories }: VipNumberDialogProps) {
+export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNumberDialogProps) {
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   
@@ -32,7 +33,7 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess, categor
       originalPrice: undefined,
       discount: undefined,
       status: 'available',
-      categorySlug: '',
+      categorySlug: '', // Default to empty string
       description: '',
       imageHint: '',
       isVip: false,
@@ -64,7 +65,7 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess, categor
           originalPrice: undefined,
           discount: undefined,
           status: 'available',
-          categorySlug: categories.length > 0 ? categories[0].slug : '', // Default to first category if available
+          categorySlug: '', // Default to empty string
           description: '',
           imageHint: '',
           isVip: false,
@@ -73,7 +74,7 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess, categor
         });
       }
     }
-  }, [vipNumber, form, isOpen, categories]);
+  }, [vipNumber, form, isOpen]);
 
 
   const handleFormSubmit = async (data: VipNumberFormData) => {
@@ -82,16 +83,26 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess, categor
     const dataToSave: Partial<VipNumberFormData & {updatedAt: Timestamp, createdAt?: Timestamp}> = {
       ...data,
       price: Number(data.price),
-      originalPrice: data.originalPrice ? Number(data.originalPrice) : (null as any), // Firestore handles null for delete/unset
+      originalPrice: data.originalPrice ? Number(data.originalPrice) : (null as any), 
       discount: data.discount ? Number(data.discount) : (null as any),
       updatedAt: serverTimestamp() as Timestamp,
     };
-     // Remove undefined fields so Firestore doesn't store them as nulls unless intended
+    
     Object.keys(dataToSave).forEach(key => {
       if (dataToSave[key as keyof typeof dataToSave] === undefined) {
         delete dataToSave[key as keyof typeof dataToSave];
       }
     });
+
+    if (!dataToSave.categorySlug || dataToSave.categorySlug.trim() === '') {
+        toast({
+            title: 'Validation Error',
+            description: 'Category Slug is required.',
+            variant: 'destructive',
+        });
+        setIsSubmitting(false);
+        return;
+    }
 
 
     try {
@@ -135,20 +146,17 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess, categor
             {vipNumber ? 'Update the details of this VIP number.' : 'Fill in the details for the new VIP number.'}
           </DialogDescription>
         </DialogHeader>
-        {categories.length === 0 && !vipNumber ? (
-           <div className="p-4 text-center text-muted-foreground">
-            Please add at least one 'Individual' type category before adding VIP numbers. Go to the Categories page to add one.
-          </div>
-        ) : (
-          <VipNumberForm
-            form={form}
-            onSubmit={handleFormSubmit}
-            isSubmitting={isSubmitting}
-            onClose={onClose}
-            categories={categories}
-          />
-        )}
+        {/* Category loading check removed */}
+        <VipNumberForm
+          form={form}
+          onSubmit={handleFormSubmit}
+          isSubmitting={isSubmitting}
+          onClose={onClose}
+          // categories prop removed
+        />
       </DialogContent>
     </Dialog>
   );
 }
+
+    
