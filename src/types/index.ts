@@ -9,7 +9,7 @@ export interface Category {
   slug: string;
   order: number;
   type: 'individual' | 'pack';
-  createdAt?: Timestamp; // Made optional to handle potentially missing data from old docs
+  createdAt?: Timestamp; 
   updatedAt?: Timestamp;
 }
 
@@ -17,9 +17,9 @@ export type CategoryFormData = z.infer<typeof categorySchema>;
 
 
 export interface VipNumber {
-  id: string; // Firestore document ID
+  id: string; 
   number: string;
-  price: number; // Selling price
+  price: number; 
   originalPrice?: number | null; 
   discount?: number | null; 
   status: 'available' | 'sold' | 'booked'; 
@@ -36,7 +36,7 @@ export type VipNumberFormData = z.infer<typeof vipNumberSchema>;
 
 
 export interface NumberPackItem {
-  id?: string; // Optional: Firestore document ID of the VIP number if linking, or for react-hook-form key
+  id?: string; 
   number: string;
   price: number; 
 }
@@ -59,7 +59,7 @@ export interface NumberPack {
 export type NumberPackFormData = z.infer<typeof numberPackSchema>;
 
 
-export interface Customer {
+export interface Customer { // This type might be for a different context, keeping it for now.
   id: string;
   name: string;
   email: string;
@@ -69,11 +69,10 @@ export interface Customer {
 }
 
 export interface AdminDisplayCustomer {
-  id: string; 
+  id: string; // Firestore document ID (should be user's UID from Auth)
   email: string;
-  name?: string; 
-  registeredOn: Timestamp;
-  createdAt?: Timestamp; 
+  name?: string; // or displayName
+  createdAt: Timestamp; // Represents registration time or when user doc was created
 }
 
 export interface AdminOrder {
