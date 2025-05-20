@@ -1,6 +1,7 @@
 
-import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import { getAuth, Auth } from 'firebase/auth';
+import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
+import { getAuth, type Auth } from 'firebase/auth';
+import { getFirestore, type Firestore } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -16,7 +17,6 @@ if (!firebaseConfig.apiKey) {
   const errorMessage =
     'CRITICAL: Firebase API Key (NEXT_PUBLIC_FIREBASE_API_KEY) is missing in your environment variables. The application cannot connect to Firebase without it. Please set this variable and restart the application.';
   console.error(errorMessage);
-  // This error will stop the app, which is appropriate if Firebase is critical.
   throw new Error(errorMessage);
 }
 if (!firebaseConfig.authDomain) {
@@ -63,4 +63,14 @@ try {
   throw new Error(UIMessage);
 }
 
-export { app, auth };
+let db: Firestore;
+try {
+  db = getFirestore(app);
+} catch (error: any) {
+  console.error('Error getting Firebase Firestore instance:', error);
+  throw new Error(
+    'Failed to initialize Firebase Firestore. Please ensure Firestore is enabled for your Firebase project and that your Firebase configuration is correct. Specific error: ' + (error instanceof Error ? error.message : String(error))
+  );
+}
+
+export { app, auth, db };

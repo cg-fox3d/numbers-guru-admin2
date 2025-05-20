@@ -1,13 +1,14 @@
+
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { ShoppingCart } from 'lucide-react';
-import Image from 'next/image';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { FileText, ShoppingCart } from 'lucide-react';
 
 export default function OrdersPage() {
   return (
     <>
       <PageHeader
-        title="Orders"
+        title="Orders Management"
         description="View and manage customer orders."
       />
       <Card className="shadow-lg">
@@ -17,24 +18,33 @@ export default function OrdersPage() {
             <span>Order Management</span>
           </CardTitle>
           <CardDescription>
-            This section for managing orders is currently under construction. 
-            You will soon be able to view order details, update statuses, and more.
+            Full implementation of order management requires an 'orders' collection in Firestore. 
+            This section will allow viewing order details, updating statuses, and more once integrated.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col items-center justify-center text-center p-10">
-          <Image 
-            src="https://placehold.co/400x300.png" 
-            alt="Feature Coming Soon" 
-            width={400} 
-            height={300} 
-            className="rounded-lg mb-6 opacity-80"
-            data-ai-hint="calendar planning"
-          />
-          <h3 className="text-xl font-semibold text-foreground mb-2">Exciting Features on the Way!</h3>
-          <p className="text-muted-foreground max-w-md">
-            Our team is developing a robust order management system. 
-            Please check back later for full functionality.
-          </p>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Order ID</TableHead>
+                <TableHead>Customer</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>Total (₹)</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow>
+                <TableCell colSpan={6} className="h-24 text-center">
+                  <div className="flex flex-col items-center justify-center">
+                    <FileText className="h-12 w-12 text-muted-foreground mb-2" />
+                    No orders found. Order data will appear here once implemented.
+                  </div>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
     </>
