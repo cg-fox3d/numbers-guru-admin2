@@ -3,7 +3,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, query, orderBy, onSnapshot, Timestamp, doc, deleteDoc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, Timestamp, doc, deleteDoc, where, getDocs } from 'firebase/firestore';
 import type { VipNumber, Category } from '@/types';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
-import { VipNumberDialog } from './dialogs/VipNumberDialog';
+import { VipNumberDialog } from '@/components/products/dialogs/VipNumberDialog'; // Corrected alias
 import { useToast } from '@/hooks/use-toast';
 import {
   AlertDialog,
@@ -28,20 +28,48 @@ import {
 
 interface VipNumbersTabProps {
   categoryMap: Record<string, string>;
-  categories: Category[]; // Pass full category objects for filtering
+  // categories prop is removed, VipNumberDialog will fetch its own categories
 }
 
-export function VipNumbersTab({ categoryMap, categories }: VipNumbersTabProps) {
+export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
   const [vipNumbers, setVipNumbers] = useState<VipNumber[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingVipNumber, setEditingVipNumber] = useState<VipNumber | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [vipNumberToDelete, setVipNumberToDelete] = useState<VipNumber | null>(null);
+  const [individualCategories, setIndividualCategories] = useState<Category[]>([]);
+  const [isLoadingCategories, setIsLoadingCategories] = useState(true);
 
   const { toast } = useToast();
 
-  const individualCategories = categories.filter(cat => cat.type === 'individual');
+  const fetchIndividualCategories = useCallback(async () => {
+    setIsLoadingCategories(true);
+    try {
+      const catQuery = query(
+        collection(db, 'categories'), 
+        where('type', '==', 'individual'),
+        orderBy('order', 'asc')
+      );
+      const snapshot = await getDocs(catQuery);
+      const fetchedCategories: Category[] = [];
+      snapshot.forEach(doc => fetchedCategories.push({ id: doc.id, ...doc.data() } as Category));
+      setIndividualCategories(fetchedCategories);
+    } catch (error) {
+      console.error("Error fetching individual categories: ", error);
+      toast({
+        title: 'Error Fetching Categories',
+        description: "Could not load categories for the form.",
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoadingCategories(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    fetchIndividualCategories();
+  }, [fetchIndividualCategories]);
 
   const fetchVipNumbers = useCallback(() => {
     setIsLoading(true);
@@ -74,11 +102,35 @@ export function VipNumbersTab({ categoryMap, categories }: VipNumbersTabProps) {
   }, [fetchVipNumbers]);
 
   const handleAddNewVipNumber = () => {
+    if (isLoadingCategories) {
+        toast({ title: 'Loading categories...', description: 'Please wait until categories are loaded.'});
+        return;
+    }
+    if (individualCategories.length === 0) {
+      toast({
+        title: 'Cannot Add VIP Number',
+        description: "Please create at least one 'Individual' type category first on the Categories page.",
+        variant: 'destructive',
+      });
+      return;
+    }
     setEditingVipNumber(null);
     setIsDialogOpen(true);
   };
 
   const handleEditVipNumber = (product: VipNumber) => {
+     if (isLoadingCategories) {
+        toast({ title: 'Loading categories...', description: 'Please wait until categories are loaded.'});
+        return;
+    }
+    if (individualCategories.length === 0 && !product.categorySlug) {
+         toast({
+            title: 'Cannot Edit VIP Number',
+            description: "No 'Individual' type categories found. Please add one first.",
+            variant: 'destructive',
+        });
+        return;
+    }
     setEditingVipNumber(product);
     setIsDialogOpen(true);
   };
@@ -113,12 +165,17 @@ export function VipNumbersTab({ categoryMap, categories }: VipNumbersTabProps) {
     }
   };
 
-  if (isLoading && vipNumbers.length === 0) { // Show full card skeleton only on initial load
+  if (isLoading && vipNumbers.length === 0) { // Initial full page loading state
     return (
       <Card>
         <CardHeader>
-          <Skeleton className="h-7 w-1/3 mb-1" />
-          <Skeleton className="h-4 w-2/3" />
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <Skeleton className="h-7 w-48 mb-1" /> {/* Adjusted width */}
+              <Skeleton className="h-4 w-64" /> {/* Adjusted width */}
+            </div>
+            <Skeleton className="h-10 w-48" /> {/* Skeleton for Add button */}
+          </div>
         </CardHeader>
         <CardContent>
           <div className="space-y-2">
@@ -146,13 +203,17 @@ export function VipNumbersTab({ categoryMap, categories }: VipNumbersTabProps) {
             <CardTitle>VIP Numbers List</CardTitle>
             <CardDescription>Browse and manage individual VIP mobile numbers.</CardDescription>
           </div>
-          <Button onClick={handleAddNewVipNumber} className="bg-primary hover:bg-primary/90">
+          <Button 
+            onClick={handleAddNewVipNumber} 
+            className="bg-primary hover:bg-primary/90"
+            disabled={isLoadingCategories} // Disable if categories are still loading
+          >
             <PlusCircle className="mr-2 h-4 w-4" /> Add New VIP Number
           </Button>
         </div>
       </CardHeader>
       <CardContent className="p-0">
-        {isLoading && vipNumbers.length > 0 && ( // Show table skeleton if loading more but some data exists
+        {isLoading && vipNumbers.length > 0 && ( // Loading state but some data might already be there (from previous snapshot)
           <Table>
             <TableHeader>
               <TableRow>
@@ -160,7 +221,7 @@ export function VipNumbersTab({ categoryMap, categories }: VipNumbersTabProps) {
                 <TableHead>Category</TableHead>
                 <TableHead>Price (₹)</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Created At</TableHead>
+                <TableHead className="hidden lg:table-cell">Created At</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -171,7 +232,7 @@ export function VipNumbersTab({ categoryMap, categories }: VipNumbersTabProps) {
                   <TableCell><Skeleton className="h-5 w-20" /></TableCell>
                   <TableCell><Skeleton className="h-5 w-16" /></TableCell>
                   <TableCell><Skeleton className="h-6 w-20 rounded-full" /></TableCell>
-                  <TableCell><Skeleton className="h-5 w-28" /></TableCell>
+                  <TableCell className="hidden lg:table-cell"><Skeleton className="h-5 w-28" /></TableCell>
                   <TableCell className="text-right"><Skeleton className="h-8 w-8 ml-auto" /></TableCell>
                 </TableRow>
               ))}
@@ -207,7 +268,7 @@ export function VipNumbersTab({ categoryMap, categories }: VipNumbersTabProps) {
                   <TableCell className="font-medium">{product.number}</TableCell>
                   <TableCell>{categoryMap[product.categorySlug] || product.categorySlug}</TableCell>
                   <TableCell className="hidden md:table-cell">{product.originalPrice?.toLocaleString() || 'N/A'}</TableCell>
-                  <TableCell className="hidden md:table-cell">{product.discount ? `${product.discount.toLocaleString()}%` : 'N/A'}</TableCell>
+                  <TableCell className="hidden md:table-cell">{product.discount ? `${product.discount}%` : 'N/A'}</TableCell>
                   <TableCell>{product.price.toLocaleString()}</TableCell>
                   <TableCell>
                     <Badge 
@@ -220,7 +281,9 @@ export function VipNumbersTab({ categoryMap, categories }: VipNumbersTabProps) {
                   <TableCell className="hidden lg:table-cell">
                     {product.createdAt instanceof Timestamp 
                       ? format(product.createdAt.toDate(), 'PPp') 
-                      : 'N/A'}
+                      : typeof product.createdAt === 'string' 
+                        ? product.createdAt 
+                        : 'N/A'}
                   </TableCell>
                   <TableCell className="text-right">
                     <DropdownMenu>
@@ -231,7 +294,7 @@ export function VipNumbersTab({ categoryMap, categories }: VipNumbersTabProps) {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleEditVipNumber(product)}>
+                        <DropdownMenuItem onClick={() => handleEditVipNumber(product)} disabled={isLoadingCategories}>
                           <Edit className="mr-2 h-4 w-4" /> Edit
                         </DropdownMenuItem>
                         <DropdownMenuItem
@@ -250,7 +313,7 @@ export function VipNumbersTab({ categoryMap, categories }: VipNumbersTabProps) {
         )}
       </CardContent>
 
-      {isDialogOpen && (
+      {isDialogOpen && !isLoadingCategories && (
         <VipNumberDialog
           isOpen={isDialogOpen}
           onClose={() => {
@@ -287,4 +350,3 @@ export function VipNumbersTab({ categoryMap, categories }: VipNumbersTabProps) {
     </Card>
   );
 }
-
