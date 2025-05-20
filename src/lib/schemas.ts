@@ -1,4 +1,6 @@
+
 import { z } from 'zod';
+import { slugify } from './utils';
 
 export const loginSchema = z.object({
   email: z.string().email({ message: 'Invalid email address.' }),
@@ -30,3 +32,21 @@ export const productSchema = z.object({
 });
 
 export type ProductFormValues = z.infer<typeof productSchema>;
+
+export const categorySchema = z.object({
+  title: z.string().min(3, { message: 'Category title must be at least 3 characters.' }),
+  slug: z.string().optional().transform((val, ctx) => {
+    if (val && val.trim() !== '') {
+      return slugify(val);
+    }
+    // If slug is empty, it will be generated from title in the dialog logic
+    return val;
+  }),
+  order: z.preprocess(
+    (val) => (typeof val === 'string' ? parseInt(val, 10) : val),
+    z.number().min(0, { message: 'Order must be a non-negative number.' })
+  ),
+  type: z.enum(['individual', 'pack'], { required_error: 'Category type is required.' }),
+});
+
+export type CategoryFormValues = z.infer<typeof categorySchema>;

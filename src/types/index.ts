@@ -5,10 +5,19 @@ export interface Category {
   id: string;
   title: string;
   slug: string;
-  order: number; // Ensure this is a number in Firestore for correct sorting
+  order: number;
   type: 'individual' | 'pack';
   createdAt: Timestamp;
 }
+
+// This is for form data, matches the schema
+export interface CategoryFormData {
+  title: string;
+  slug?: string; // Optional in form, will be auto-generated if empty
+  order: number;
+  type: 'individual' | 'pack';
+}
+
 
 export interface VipNumber {
   id: string; // Firestore document ID
@@ -18,35 +27,31 @@ export interface VipNumber {
   discount?: number; // Optional: discount percentage or amount
   status: 'available' | 'sold' | 'booked'; // Example statuses
   categorySlug: string; 
-  // Optional fields from your structure:
   imageHint?: string;
   isVip?: boolean;
   sumOfDigits?: string;
   totalDigits?: string;
-  // Recommended for ordering:
-  createdAt: Timestamp; 
+  createdAt?: Timestamp; // Should be Timestamp for ordering
 }
 
 export interface NumberPackItem {
-  id: string; // Corresponds to a vipNumber document ID or a unique identifier for the number in the pack
+  id: string; 
   number: string;
-  price: number; // Original price of this individual number if it were sold alone
+  price: number; 
 }
 
 export interface NumberPack {
-  id: string; // Firestore document ID
-  name: string; // Pack name, e.g., "Value Family Pack"
-  numbers: NumberPackItem[]; // Array of numbers in the pack
-  packPrice: number; // Selling price of the pack
-  totalOriginalPrice?: number; // Optional: Sum of original prices of numbers in the pack
-  status: 'available' | 'sold'; // Example statuses
+  id: string; 
+  name: string; 
+  numbers: NumberPackItem[]; 
+  packPrice: number; 
+  totalOriginalPrice?: number; 
+  status: 'available' | 'sold'; 
   categorySlug: string;
   description?: string;
-  // Optional fields from your structure:
   imageHint?: string;
   isVipPack?: boolean;
-  // Recommended for ordering:
-  createdAt: Timestamp;
+  createdAt?: Timestamp; // Should be Timestamp for ordering
 }
 
 export interface Customer {

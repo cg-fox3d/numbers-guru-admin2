@@ -59,21 +59,15 @@ export default function CategoriesPage() {
     if (!categoryToDelete || !categoryToDelete.id) return;
     setIsDeleting(true);
     try {
-      // TODO: In a real app, check if this category is being used by any products (vipNumbers or numberPacks)
-      // const vipNumbersQuery = query(collection(db, "vipNumbers"), where("categorySlug", "==", categoryToDelete.slug));
-      // const numberPacksQuery = query(collection(db, "numberPacks"), where("categorySlug", "==", categoryToDelete.slug));
-      // const vipNumbersSnapshot = await getDocs(vipNumbersQuery);
-      // const numberPacksSnapshot = await getDocs(numberPacksQuery);
-      // if (!vipNumbersSnapshot.empty || !numberPacksSnapshot.empty) {
-      //   toast({
-      //     title: "Deletion Failed",
-      //     description: "This category is currently in use by one or more products and cannot be deleted.",
-      //     variant: "destructive",
-      //   });
-      //   setIsDeleting(false);
-      //   closeDeleteConfirmDialog();
-      //   return;
-      // }
+      // TODO: In a real app, check if this category is being used by any products.
+      // This would involve querying 'vipNumbers' and 'numberPacks' collections
+      // where categorySlug matches categoryToDelete.slug.
+      // If in use, show a more informative error toast and prevent deletion.
+      // For example:
+      // const productCheckQuery = query(collection(db, "vipNumbers"), where("categorySlug", "==", categoryToDelete.slug));
+      // const productSnapshot = await getDocs(productCheckQuery);
+      // if (!productSnapshot.empty) { ... throw error ... } 
+      // (similar for numberPacks)
 
       await deleteDoc(doc(db, 'categories', categoryToDelete.id));
       toast({
@@ -100,6 +94,7 @@ export default function CategoriesPage() {
     // This query also requires a composite index in Firestore. 
     // Firebase usually provides a link in the console error to create it.
     // The index typically involves: `categories` collection, `order` (ASC), `createdAt` (DESC).
+    // Example Firestore Index: Collection: categories, Fields: order (Ascending), createdAt (Descending)
     const q = query(collection(db, 'categories'), orderBy('order', 'asc'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, 
       (querySnapshot) => {
@@ -148,7 +143,7 @@ export default function CategoriesPage() {
           <CardDescription>
             View, add, edit, and delete categories for VIP numbers and number packs.
             Note: Ensure 'order' field in Firestore is a Number for correct sorting.
-            A Firestore index is required for ordering by 'order' and 'createdAt'.
+            A Firestore index on 'categories' for 'order' (ASC) then 'createdAt' (DESC) is required.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -170,6 +165,9 @@ export default function CategoriesPage() {
               <PackageSearch className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-xl font-semibold">No Categories Found</h3>
               <p className="text-muted-foreground">Create your first category to see it listed here.</p>
+              <Button onClick={handleAddNewCategory} className="mt-4 bg-primary hover:bg-primary/90">
+                <PlusCircle className="mr-2 h-4 w-4" /> Add First Category
+              </Button>
             </div>
           ) : (
             <Table>
@@ -198,7 +196,7 @@ export default function CategoriesPage() {
                       {category.createdAt instanceof Timestamp
                         ? format(category.createdAt.toDate(), 'PPp')
                         : typeof category.createdAt === 'string' 
-                          ? category.createdAt // Fallback if it's a string for some reason
+                          ? category.createdAt 
                           : 'N/A'}
                     </TableCell>
                     <TableCell className="text-right">
@@ -235,7 +233,7 @@ export default function CategoriesPage() {
                 setEditingCategory(null);
             }}
             category={editingCategory}
-            onSuccess={() => fetchCategories()} // Re-fetch or update local state
+            onSuccess={() => { /* Data re-fetches via onSnapshot automatically */ }}
         />
       )}
 
@@ -246,7 +244,7 @@ export default function CategoriesPage() {
               <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
               <AlertDialogDescription>
                 This action cannot be undone. This will permanently delete the category
-                "{categoryToDelete.title}".
+                "{categoryToDelete.title}". Make sure no products are using this category.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -263,4 +261,3 @@ export default function CategoriesPage() {
     </>
   );
 }
-
