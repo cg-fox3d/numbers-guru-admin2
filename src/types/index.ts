@@ -1,5 +1,7 @@
 
 import type { Timestamp } from 'firebase/firestore';
+import type { numberPackItemSchema, numberPackSchema, vipNumberSchema, categorySchema } from '@/lib/schemas';
+import type { z } from 'zod';
 
 export interface Category {
   id: string;
@@ -7,52 +9,55 @@ export interface Category {
   slug: string;
   order: number;
   type: 'individual' | 'pack';
-  createdAt: Timestamp;
+  createdAt?: Timestamp; // Made optional to handle potentially missing data from old docs
+  updatedAt?: Timestamp;
 }
 
-// This is for form data, matches the schema
-export interface CategoryFormData {
-  title: string;
-  slug?: string; // Optional in form, will be auto-generated if empty
-  order: number;
-  type: 'individual' | 'pack';
-}
+export type CategoryFormData = z.infer<typeof categorySchema>;
 
 
 export interface VipNumber {
   id: string; // Firestore document ID
   number: string;
   price: number; // Selling price
-  originalPrice?: number; // Optional: original price before discount
-  discount?: number; // Optional: discount percentage or amount
-  status: 'available' | 'sold' | 'booked'; // Example statuses
+  originalPrice?: number | null; 
+  discount?: number | null; 
+  status: 'available' | 'sold' | 'booked'; 
   categorySlug: string; 
+  description?: string;
   imageHint?: string;
   isVip?: boolean;
   sumOfDigits?: string;
   totalDigits?: string;
-  createdAt?: Timestamp; // Should be Timestamp for ordering
+  createdAt?: Timestamp; 
+  updatedAt?: Timestamp;
 }
+export type VipNumberFormData = z.infer<typeof vipNumberSchema>;
+
 
 export interface NumberPackItem {
-  id: string; 
+  id?: string; // Optional: Firestore document ID of the VIP number if linking, or for react-hook-form key
   number: string;
   price: number; 
 }
+export type NumberPackItemFormData = z.infer<typeof numberPackItemSchema>;
 
 export interface NumberPack {
   id: string; 
   name: string; 
   numbers: NumberPackItem[]; 
   packPrice: number; 
-  totalOriginalPrice?: number; 
+  totalOriginalPrice?: number | null; 
   status: 'available' | 'sold'; 
   categorySlug: string;
   description?: string;
   imageHint?: string;
   isVipPack?: boolean;
-  createdAt?: Timestamp; // Should be Timestamp for ordering
+  createdAt?: Timestamp; 
+  updatedAt?: Timestamp;
 }
+export type NumberPackFormData = z.infer<typeof numberPackSchema>;
+
 
 export interface Customer {
   id: string;
@@ -87,3 +92,4 @@ export interface DashboardStats {
   ordersThisMonth: number;
   productsInStock: number;
 }
+
