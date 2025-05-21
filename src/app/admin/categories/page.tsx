@@ -4,7 +4,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'; // Added CardFooter
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -31,22 +31,24 @@ import {
 const PAGE_SIZE = 10;
 
 export default function CategoriesPage() {
-  const [categoriesOnPage, setCategoriesOnPage] = useState<Category[]>([]); 
-  const [filteredCategories, setFilteredCategories] = useState<Category[]>([]); 
+  const [categoriesOnPage, setCategoriesOnPage] = useState<Category[]>([]);
+  const [filteredCategories, setFilteredCategories] = useState<Category[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [categoryToDelete, setCategoryToDelete] = useState<Category | null>(null);
   const { toast } = useToast();
-
   const [searchTerm, setSearchTerm] = useState('');
 
-  const [currentPageIndex, setCurrentPageIndex] = useState(0); 
-  const [pageCursors, setPageCursors] = useState<(QueryDocumentSnapshot<Category> | null)[]>([null]); 
+  const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  // pageCursors[i] stores the first document snapshot of page i. pageCursors[0] is always null.
+  const [pageCursors, setPageCursors] = useState<(QueryDocumentSnapshot<Category> | null)[]>([null]);
   const [hasNextPage, setHasNextPage] = useState(false);
+  const [lastFetchedDoc, setLastFetchedDoc] = useState<QueryDocumentSnapshot<Category> | null>(null);
 
-  const buildQuery = useCallback((cursor?: QueryDocumentSnapshot<Category> | null) => {
+
+  const buildPageQuery = useCallback((cursor?: QueryDocumentSnapshot<Category> | null) => {
     let q = query(
       collection(db, 'categories'),
       orderBy('order', 'asc'),
@@ -55,28 +57,28 @@ export default function CategoriesPage() {
     if (cursor) {
       q = query(q, startAfter(cursor));
     }
-    return query(q, limit(PAGE_SIZE + 1)); 
-  }, []); // Removed PAGE_SIZE from deps as it's constant
+    return query(q, limit(PAGE_SIZE + 1));
+  }, []);
 
-  const loadCategories = useCallback(async (pageIdx: number, direction?: 'next' | 'prev' | 'refresh') => {
+  const loadCategories = useCallback(async (pageIdxToLoad: number, options?: { isRefresh?: boolean }) => {
     setIsLoading(true);
-    let cursorForQuery: QueryDocumentSnapshot<Category> | null = null;
+    const isActualRefresh = options?.isRefresh || (pageIdxToLoad === 0 && pageCursors.length <= 1 && pageCursors[0] === null);
 
-    if (direction === 'refresh') {
-      cursorForQuery = null;
-      // When refreshing, we intend to load page 0
-      if (pageIdx !== 0) {
-        // This should ideally not happen if refresh always targets page 0
-        // but as a safeguard, or if refresh logic evolves:
-        setCurrentPageIndex(0); // Reset to page 0
-        setPageCursors([null]); // Reset cursors entirely
-      }
+    let queryCursor: QueryDocumentSnapshot<Category> | null = null;
+    let effectivePageIdx = pageIdxToLoad;
+
+    if (isActualRefresh) {
+      effectivePageIdx = 0;
+      setSearchTerm('');
+      setPageCursors([null]); // Reset cursors
+      setLastFetchedDoc(null);
+      if (currentPageIndex !== 0) setCurrentPageIndex(0);
     } else {
-      cursorForQuery = pageCursors[pageIdx] || null;
+      queryCursor = pageCursors[effectivePageIdx] || null;
     }
     
     try {
-      const categoriesQuery = buildQuery(cursorForQuery);
+      const categoriesQuery = buildPageQuery(queryCursor);
       const documentSnapshots = await getDocs(categoriesQuery);
       
       const fetchedCategories: Category[] = [];
@@ -89,21 +91,23 @@ export default function CategoriesPage() {
       const newHasNextPage = documentSnapshots.docs.length > PAGE_SIZE;
       setHasNextPage(newHasNextPage);
 
-      if (direction === 'next' && newHasNextPage) {
-        const lastDocOnPage = documentSnapshots.docs[PAGE_SIZE - 1] as QueryDocumentSnapshot<Category>;
-        setPageCursors(prevCursors => {
-          const newCursors = [...prevCursors];
-          newCursors[pageIdx + 1] = lastDocOnPage;
-          return newCursors;
-        });
-      } else if (direction === 'refresh') {
-        const newCursors: (QueryDocumentSnapshot<Category> | null)[] = [null];
-        if (newHasNextPage) {
-           const lastDocOnPage = documentSnapshots.docs[PAGE_SIZE - 1] as QueryDocumentSnapshot<Category>;
-           newCursors[1] = lastDocOnPage;
-        }
-        setPageCursors(newCursors);
+      if (newHasNextPage) {
+        const lastDocOnThisPage = documentSnapshots.docs[PAGE_SIZE - 1] as QueryDocumentSnapshot<Category>;
+        setLastFetchedDoc(lastDocOnThisPage);
+      } else {
+        setLastFetchedDoc(null);
       }
+
+      // Update pageCursors for the *next* page if we are moving forward
+      // This is implicitly handled by setting lastFetchedDoc and using it in handleNextPage.
+      // pageCursors array stores the *first* doc of each page.
+      if (effectivePageIdx === 0 && fetchedCategories.length > 0 && !pageCursors[0]) {
+         // pageCursors[0] is always null
+      } else if (fetchedCategories.length > 0 && !pageCursors[effectivePageIdx] && effectivePageIdx > 0) {
+        // This logic needs care if we strictly store first doc of each page
+        // For now, handleNextPage primarily uses lastFetchedDoc
+      }
+
 
     } catch (error) {
       console.error("Error fetching categories: ", error);
@@ -116,11 +120,12 @@ export default function CategoriesPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast, buildQuery, pageCursors]); 
+  }, [toast, buildPageQuery, currentPageIndex, pageCursors]);
 
   useEffect(() => {
-    loadCategories(currentPageIndex, currentPageIndex === 0 ? 'refresh' : undefined);
-  }, [currentPageIndex, loadCategories]);
+    const isRefreshIntent = currentPageIndex === 0 && (pageCursors.length <=1 && pageCursors[0] === null);
+    loadCategories(currentPageIndex, { isRefresh: isRefreshIntent });
+  }, [currentPageIndex, loadCategories]); // `pageCursors` removed to avoid loop on its update by loadCategories
 
   useEffect(() => {
     if (searchTerm === '') {
@@ -135,17 +140,21 @@ export default function CategoriesPage() {
     }
   }, [searchTerm, categoriesOnPage]);
 
-  const handleRefresh = () => {
-    setSearchTerm('');
+  const handleRefresh = useCallback(() => {
     if (currentPageIndex === 0) {
-        loadCategories(0, 'refresh'); // Explicitly call refresh if already on page 0
+      loadCategories(0, { isRefresh: true });
     } else {
-        setCurrentPageIndex(0); // This will trigger the useEffect to load page 0 with 'refresh'
+      setCurrentPageIndex(0); // This will trigger the useEffect which calls loadCategories
     }
-  };
+  }, [currentPageIndex, loadCategories]);
 
   const handleNextPage = () => {
-    if (hasNextPage) {
+    if (hasNextPage && lastFetchedDoc) {
+      setPageCursors(prev => {
+        const newCursors = [...prev];
+        newCursors[currentPageIndex + 1] = lastFetchedDoc; // Store cursor for the page we are navigating to
+        return newCursors;
+      });
       setCurrentPageIndex(prev => prev + 1);
     }
   };
@@ -183,9 +192,8 @@ export default function CategoriesPage() {
         title: 'Category Deleted',
         description: `Category "${categoryToDelete.title}" has been successfully deleted.`,
       });
-      // Attempt to reload current page. If it becomes empty after deletion, user might need to navigate.
-      // Or, consider more sophisticated logic e.g., go to prev page if current page is now empty and not page 0.
-      loadCategories(currentPageIndex); 
+      // Refresh current page. If it became empty, ideally navigate or handle.
+      loadCategories(currentPageIndex, {isRefresh: currentPageIndex === 0 && categoriesOnPage.length === 1});
     } catch (error) {
       console.error("Error deleting category: ", error);
       toast({
@@ -199,9 +207,9 @@ export default function CategoriesPage() {
     }
   };
   
-  const onDialogSuccess = () => {
-    loadCategories(currentPageIndex, 'refresh'); // Refresh current page (or page 0 if it was the first page)
-  };
+  const onDialogSuccess = useCallback(() => {
+    loadCategories(currentPageIndex, { isRefresh: currentPageIndex === 0 });
+  }, [currentPageIndex, loadCategories]);
 
 
   return (
@@ -228,6 +236,7 @@ export default function CategoriesPage() {
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="pl-10 w-full md:w-1/2 lg:w-1/3"
+          disabled={isLoading && categoriesOnPage.length === 0}
         />
       </div>
       <Card className="shadow-lg">
@@ -324,7 +333,7 @@ export default function CategoriesPage() {
             </Table>
           )}
         </CardContent>
-        {categoriesOnPage.length > 0 && (
+        {(categoriesOnPage.length > 0 || hasNextPage || currentPageIndex > 0) && !isLoading && (
             <CardFooter className="flex items-center justify-between p-4 border-t">
                 <span className="text-sm text-muted-foreground">
                     Page {currentPageIndex + 1}
