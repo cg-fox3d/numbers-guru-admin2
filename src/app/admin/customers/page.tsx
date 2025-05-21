@@ -3,13 +3,13 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/common/PageHeader';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
-import { Users, MoreHorizontal, Search as SearchIcon, PackageSearch } from 'lucide-react';
+import { Users, MoreHorizontal, Search as SearchIcon, PackageSearch, RefreshCcw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { db } from '@/lib/firebase';
-import { collection, query, orderBy, Timestamp, getDocs } from 'firebase/firestore';
+import { collection, query, orderBy, Timestamp, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
 import type { AdminDisplayCustomer } from '@/types';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
@@ -21,50 +21,109 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
+const PAGE_SIZE = 10;
+
 export default function CustomersPage() {
-  const [allCustomers, setAllCustomers] = useState<AdminDisplayCustomer[]>([]);
+  const [customersOnPage, setCustomersOnPage] = useState<AdminDisplayCustomer[]>([]);
   const [filteredCustomers, setFilteredCustomers] = useState<AdminDisplayCustomer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const { toast } = useToast();
 
-  const loadCustomers = useCallback(async () => {
+  const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  // pageStartCursors[i] stores the first document of page i. pageStartCursors[0] is null.
+  const [pageStartCursors, setPageStartCursors] = useState<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
+  const [lastVisibleDoc, setLastVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [firstVisibleDoc, setFirstVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [hasNextPage, setHasNextPage] = useState(false);
+
+  const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null) => {
+    let q = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
+    if (cursor) {
+      q = query(q, startAfter(cursor), limit(PAGE_SIZE + 1));
+    } else {
+      q = query(q, limit(PAGE_SIZE + 1));
+    }
+    return q;
+  }, []);
+
+  const loadCustomers = useCallback(async (pageIdxToLoad: number, options: { isRefresh?: boolean } = {}) => {
     setIsLoading(true);
-    setSearchTerm(''); // Reset search on full load
+    if (options.isRefresh) {
+      setSearchTerm('');
+    }
+
     try {
-      const customersQuery = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
+      let queryCursor: QueryDocumentSnapshot<DocumentData> | null = null;
+
+      if (options.isRefresh || pageIdxToLoad === 0) {
+        queryCursor = null;
+        if (options.isRefresh) { // Full reset for refresh
+             setPageStartCursors([null]);
+        }
+      } else if (pageIdxToLoad > 0 && pageIdxToLoad < pageStartCursors.length) {
+        queryCursor = pageStartCursors[pageIdxToLoad];
+      } else if (pageIdxToLoad > 0 && lastVisibleDoc && pageIdxToLoad === pageStartCursors.length) {
+        // Trying to go to a new next page, so current lastVisibleDoc is the cursor
+        queryCursor = lastVisibleDoc;
+      }
+
+
+      const customersQuery = buildPageQuery(queryCursor);
       const documentSnapshots = await getDocs(customersQuery);
+
       const fetchedCustomers: AdminDisplayCustomer[] = [];
-      documentSnapshots.docs.forEach((docSn) => {
+      documentSnapshots.docs.slice(0, PAGE_SIZE).forEach((docSn) => {
         fetchedCustomers.push({ id: docSn.id, ...docSn.data() } as AdminDisplayCustomer);
       });
-      setAllCustomers(fetchedCustomers);
-      setFilteredCustomers(fetchedCustomers);
+
+      setCustomersOnPage(fetchedCustomers);
+
+      const newFirstVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null;
+      setFirstVisibleDoc(newFirstVisibleDoc);
+
+      const newLastVisibleDoc = documentSnapshots.docs.length > PAGE_SIZE
+        ? documentSnapshots.docs[PAGE_SIZE - 1]
+        : (documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length -1] : null);
+      setLastVisibleDoc(newLastVisibleDoc);
+
+      const newHasNextPage = documentSnapshots.docs.length > PAGE_SIZE;
+      setHasNextPage(newHasNextPage);
+      
+      if (options.isRefresh || pageIdxToLoad === 0) {
+        // Reset cursors, keeping null for page 0 and adding start of page 0 if docs exist
+        setPageStartCursors(newFirstVisibleDoc ? [null, newFirstVisibleDoc] : [null]);
+      } else if (pageIdxToLoad >= pageStartCursors.length && newFirstVisibleDoc && queryCursor === lastVisibleDoc) {
+        // This means we successfully navigated to a new "next" page
+        setPageStartCursors(prev => [...prev, newFirstVisibleDoc]);
+      }
+
+
     } catch (error) {
       console.error("Error fetching customers: ", error);
-      setAllCustomers([]);
-      setFilteredCustomers([]);
       toast({
         title: 'Error Fetching Customers',
         description: (error as Error).message || 'Could not load customer data. An index on \'users\' for \'createdAt\' (desc) might be required.',
         variant: 'destructive',
       });
+      setCustomersOnPage([]);
+      setHasNextPage(false);
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast, buildPageQuery]); // Removed pageStartCursors, lastVisibleDoc
 
   useEffect(() => {
-    loadCustomers();
-  }, [loadCustomers]);
+    loadCustomers(currentPageIndex, {isRefresh: currentPageIndex === 0 && pageStartCursors.length <=1 });
+  }, [currentPageIndex, loadCustomers]); // loadCustomers is memoized
 
   useEffect(() => {
-    const lowercasedFilter = searchTerm.toLowerCase();
-    const currentCustomers = allCustomers || [];
-
     if (searchTerm === '') {
-      setFilteredCustomers(currentCustomers);
+      setFilteredCustomers(customersOnPage);
     } else {
+      const lowercasedFilter = searchTerm.toLowerCase();
+      // Client-side search on the current page's data
+      const currentCustomers = customersOnPage || [];
       const filteredData = currentCustomers.filter(customer => {
         const nameMatch = customer.name?.toLowerCase().includes(lowercasedFilter);
         const emailMatch = customer.email?.toLowerCase().includes(lowercasedFilter);
@@ -72,14 +131,39 @@ export default function CustomersPage() {
       });
       setFilteredCustomers(filteredData);
     }
-  }, [searchTerm, allCustomers]);
+  }, [searchTerm, customersOnPage]);
+
+  const handleRefresh = useCallback(() => {
+    if (currentPageIndex === 0) {
+        loadCustomers(0, { isRefresh: true });
+    } else {
+        setCurrentPageIndex(0); // This will trigger useEffect to load page 0 with refresh logic
+    }
+  }, [loadCustomers, currentPageIndex]);
+
+  const handleNextPage = () => {
+    if (hasNextPage) {
+      setCurrentPageIndex(prev => prev + 1);
+    }
+  };
+
+  const handlePrevPage = () => {
+    if (currentPageIndex > 0) {
+      setCurrentPageIndex(prev => prev - 1);
+    }
+  };
 
   return (
     <>
       <PageHeader
         title="Customers Management"
         description="View and search customer information from the 'users' collection."
-        // No refresh button action needed here anymore
+        actions={
+          <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading}>
+            <RefreshCcw className="h-4 w-4" />
+            <span className="sr-only">Refresh</span>
+          </Button>
+        }
       />
       <Card className="shadow-lg">
         <CardHeader>
@@ -90,7 +174,7 @@ export default function CustomersPage() {
                 <span>Customer List</span>
               </CardTitle>
               <CardDescription>
-                Displaying users from the Firestore 'users' collection. Ensure this collection exists and has a 'createdAt' (Timestamp) field.
+                Displaying users from the Firestore 'users' collection.
                 An index on 'users' for 'createdAt' (descending) may be required by Firestore.
               </CardDescription>
             </div>
@@ -99,16 +183,16 @@ export default function CustomersPage() {
             <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
             <Input
               type="search"
-              placeholder="Search by email or name..."
+              placeholder="Search by email or name on current page..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 w-full md:w-1/2 lg:w-1/3"
-              disabled={isLoading && (allCustomers || []).length === 0}
+              disabled={isLoading && (customersOnPage || []).length === 0}
             />
           </div>
         </CardHeader>
-        <CardContent className="p-0">
-          {isLoading && (filteredCustomers || []).length === 0 ? ( 
+        <CardContent className="p-0 min-h-[300px]">
+          {isLoading ? (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -131,17 +215,19 @@ export default function CustomersPage() {
                 ))}
               </TableBody>
             </Table>
-          ) : !isLoading && (filteredCustomers || []).length === 0 ? ( 
-            <div className="flex flex-col items-center justify-center text-center p-10">
+          ) : !isLoading && (filteredCustomers || []).length === 0 ? (
+            <div className="flex flex-col items-center justify-center text-center p-10 min-h-[300px]">
               <PackageSearch className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-xl font-semibold">
-                 {searchTerm ? 'No Customers Match Your Search' : 'No Customers Found'}
+                 {searchTerm ? 'No Customers Match Your Search' :
+                  (customersOnPage || []).length === 0 ? 'No Customers Found' : 'No Customers Match Your Search'}
               </h3>
               <p className="text-muted-foreground">
-                {searchTerm ? 'Try a different search term.' : "The 'users' collection might be empty or there was an issue fetching data."}
+                {searchTerm ? 'Try a different search term or clear search.' :
+                 (customersOnPage || []).length === 0 ? "The 'users' collection might be empty or there was an issue fetching data." : 'Adjust your search.'}
               </p>
             </div>
-          ) : ( 
+          ) : (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -161,8 +247,8 @@ export default function CustomersPage() {
                     <TableCell>
                       {customer.createdAt instanceof Timestamp
                         ? format(customer.createdAt.toDate(), 'PPp')
-                        : typeof customer.createdAt === 'string' 
-                          ? customer.createdAt 
+                        : typeof customer.createdAt === 'string'
+                          ? customer.createdAt
                           : 'N/A'}
                     </TableCell>
                     <TableCell className="text-right">
@@ -188,6 +274,31 @@ export default function CustomersPage() {
             </Table>
           )}
         </CardContent>
+        {(customersOnPage || []).length > 0 && (
+            <CardFooter className="flex items-center justify-between p-4 border-t">
+                <span className="text-sm text-muted-foreground">
+                    Page {currentPageIndex + 1}
+                </span>
+                <div className="flex gap-2">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handlePrevPage}
+                        disabled={currentPageIndex === 0 || isLoading}
+                    >
+                        <ChevronLeft className="h-4 w-4 mr-1" /> Previous
+                    </Button>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleNextPage}
+                        disabled={!hasNextPage || isLoading}
+                    >
+                        Next <ChevronRight className="h-4 w-4 ml-1" />
+                    </Button>
+                </div>
+            </CardFooter>
+        )}
       </Card>
     </>
   );
