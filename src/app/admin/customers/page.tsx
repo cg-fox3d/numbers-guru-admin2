@@ -31,6 +31,7 @@ export default function CustomersPage() {
   const { toast } = useToast();
 
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  // pageCursors[i] stores the first document snapshot of page i. pageCursors[0] is always null.
   const [pageCursors, setPageCursors] = useState<(QueryDocumentSnapshot<AdminDisplayCustomer> | null)[]>([null]);
   const [hasNextPage, setHasNextPage] = useState(false);
   const [lastFetchedDoc, setLastFetchedDoc] = useState<QueryDocumentSnapshot<AdminDisplayCustomer> | null>(null);
@@ -51,10 +52,10 @@ export default function CustomersPage() {
 
     if (isActualRefresh) {
       effectivePageIdx = 0;
-      setSearchTerm('');
-      setPageCursors([null]);
+      setSearchTerm(''); // Reset search term on refresh
+      setPageCursors([null]); // Reset cursors
       setLastFetchedDoc(null);
-      if (currentPageIndex !== 0) setCurrentPageIndex(0);
+      if (currentPageIndex !== 0) setCurrentPageIndex(0); // This will trigger effect to load page 0
     } else {
       queryCursor = pageCursors[effectivePageIdx] || null;
     }
@@ -67,15 +68,20 @@ export default function CustomersPage() {
         fetchedCustomers.push({ id: docSn.id, ...docSn.data() } as AdminDisplayCustomer);
       });
       setCustomersOnPage(fetchedCustomers);
+      
       const newHasNextPage = documentSnapshots.docs.length > PAGE_SIZE;
       setHasNextPage(newHasNextPage);
+
       if (newHasNextPage) {
-        setLastFetchedDoc(documentSnapshots.docs[PAGE_SIZE - 1] as QueryDocumentSnapshot<AdminDisplayCustomer>);
+        const lastDocOnThisPage = documentSnapshots.docs[PAGE_SIZE - 1] as QueryDocumentSnapshot<AdminDisplayCustomer>;
+        setLastFetchedDoc(lastDocOnThisPage);
       } else {
         setLastFetchedDoc(null);
       }
+
     } catch (error) {
       console.error("Error fetching customers: ", error);
+      setCustomersOnPage([]); // Set to empty array on error
       toast({
         title: 'Error Fetching Customers',
         description: (error as Error).message || 'Could not load customer data. An index on \'users\' for \'createdAt\' (desc) might be required.',
@@ -85,21 +91,26 @@ export default function CustomersPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast, buildPageQuery, currentPageIndex, pageCursors]);
+  }, [toast, buildPageQuery, currentPageIndex]); // Removed pageCursors from deps
 
   useEffect(() => {
-    const isRefreshIntent = currentPageIndex === 0 && (pageCursors.length <=1 && pageCursors[0] === null);
+    // This effect runs when currentPageIndex changes OR if loadCustomers reference changes (which it shouldn't much now)
+    const isRefreshIntent = currentPageIndex === 0 && (pageCursors.length <=1 && pageCursors[0] === null) && !searchTerm;
     loadCustomers(currentPageIndex, { isRefresh: isRefreshIntent });
   }, [currentPageIndex, loadCustomers]);
 
   useEffect(() => {
     const lowercasedFilter = searchTerm.toLowerCase();
+    // Ensure customersOnPage is treated as an array, even if it's unexpectedly undefined
+    const currentCustomers = customersOnPage || [];
+
     if (searchTerm === '') {
-      setFilteredCustomers(customersOnPage);
+      setFilteredCustomers(currentCustomers);
     } else {
-      const filteredData = customersOnPage.filter(customer => {
+      const filteredData = currentCustomers.filter(customer => {
         const nameMatch = customer.name?.toLowerCase().includes(lowercasedFilter);
-        const emailMatch = customer.email.toLowerCase().includes(lowercasedFilter);
+        // Ensure email is also safely accessed if it could ever be missing from a customer object
+        const emailMatch = customer.email?.toLowerCase().includes(lowercasedFilter);
         return nameMatch || emailMatch;
       });
       setFilteredCustomers(filteredData);
@@ -110,7 +121,7 @@ export default function CustomersPage() {
     if (currentPageIndex === 0) {
       loadCustomers(0, { isRefresh: true });
     } else {
-      setCurrentPageIndex(0);
+      setCurrentPageIndex(0); // This will trigger the useEffect which calls loadCustomers with refresh intent
     }
   }, [currentPageIndex, loadCustomers]);
 
@@ -118,7 +129,7 @@ export default function CustomersPage() {
     if (hasNextPage && lastFetchedDoc) {
       setPageCursors(prev => {
         const newCursors = [...prev];
-        newCursors[currentPageIndex + 1] = lastFetchedDoc;
+        newCursors[currentPageIndex + 1] = lastFetchedDoc; // Store cursor for the page we are navigating to
         return newCursors;
       });
       setCurrentPageIndex(prev => prev + 1);
@@ -164,12 +175,12 @@ export default function CustomersPage() {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 w-full md:w-1/2 lg:w-1/3"
-              disabled={isLoading && customersOnPage.length === 0}
+              disabled={isLoading && (customersOnPage || []).length === 0}
             />
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          {isLoading && filteredCustomers.length === 0 ? ( 
+          {isLoading && (filteredCustomers || []).length === 0 ? ( 
             <Table>
               <TableHeader>
                 <TableRow>
@@ -192,7 +203,7 @@ export default function CustomersPage() {
                 ))}
               </TableBody>
             </Table>
-          ) : !isLoading && filteredCustomers.length === 0 ? ( 
+          ) : !isLoading && (filteredCustomers || []).length === 0 ? ( 
             <div className="flex flex-col items-center justify-center text-center p-10">
               <PackageSearch className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-xl font-semibold">
@@ -214,7 +225,7 @@ export default function CustomersPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredCustomers.map((customer) => (
+                {(filteredCustomers || []).map((customer) => (
                   <TableRow key={customer.id}>
                     <TableCell className="font-mono text-xs">{customer.id}</TableCell>
                     <TableCell>{customer.email}</TableCell>
@@ -249,7 +260,7 @@ export default function CustomersPage() {
             </Table>
           )}
         </CardContent>
-         {(customersOnPage.length > 0 || hasNextPage || currentPageIndex > 0) && !isLoading && (
+         {((customersOnPage || []).length > 0 || hasNextPage || currentPageIndex > 0) && !isLoading && (
             <CardFooter className="flex items-center justify-between p-4 border-t">
                 <span className="text-sm text-muted-foreground">
                     Page {currentPageIndex + 1}
@@ -280,3 +291,4 @@ export default function CustomersPage() {
     </>
   );
 }
+
