@@ -1,15 +1,15 @@
 
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/common/PageHeader';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
-import { Users, MoreHorizontal, Search as SearchIcon, RefreshCcw, ChevronLeft, ChevronRight, PackageSearch } from 'lucide-react';
+import { Users, MoreHorizontal, Search as SearchIcon, PackageSearch } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { db } from '@/lib/firebase';
-import { collection, query, orderBy, Timestamp, getDocs, limit, startAfter, QueryDocumentSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, Timestamp, getDocs } from 'firebase/firestore';
 import type { AdminDisplayCustomer } from '@/types';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
@@ -21,98 +21,46 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
-const PAGE_SIZE = 10;
-
 export default function CustomersPage() {
-  const [customersOnPage, setCustomersOnPage] = useState<AdminDisplayCustomer[]>([]);
+  const [allCustomers, setAllCustomers] = useState<AdminDisplayCustomer[]>([]);
   const [filteredCustomers, setFilteredCustomers] = useState<AdminDisplayCustomer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const { toast } = useToast();
 
-  const [currentPageIndex, setCurrentPageIndex] = useState(0);
-  const [pageCursors, setPageCursors] = useState<(QueryDocumentSnapshot<AdminDisplayCustomer> | null)[]>([null]);
-  const pageCursorsRef = useRef(pageCursors); // Ref to hold current pageCursors
-  const [hasNextPage, setHasNextPage] = useState(false);
-  const [lastFetchedDoc, setLastFetchedDoc] = useState<QueryDocumentSnapshot<AdminDisplayCustomer> | null>(null);
-
-  useEffect(() => {
-    pageCursorsRef.current = pageCursors;
-  }, [pageCursors]);
-
-  const buildPageQuery = useCallback((cursor?: QueryDocumentSnapshot<AdminDisplayCustomer> | null) => {
-    let q = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
-    if (cursor) {
-      q = query(q, startAfter(cursor));
-    }
-    return query(q, limit(PAGE_SIZE + 1));
-  }, []);
-
-  const loadCustomers = useCallback(async (pageIdxToLoad: number, options?: { isRefresh?: boolean }) => {
+  const loadCustomers = useCallback(async () => {
     setIsLoading(true);
-    const isActualRefresh = options?.isRefresh || (pageIdxToLoad === 0 && pageCursorsRef.current.length <= 1 && pageCursorsRef.current[0] === null);
-    
-    let queryCursor: QueryDocumentSnapshot<AdminDisplayCustomer> | null = null;
-    let effectivePageIdx = pageIdxToLoad;
-
-    if (isActualRefresh) {
-      effectivePageIdx = 0;
-      setSearchTerm(''); 
-      setPageCursors([null]); 
-      setLastFetchedDoc(null);
-      if (currentPageIndex !== 0 && pageIdxToLoad === 0) {
-        // setCurrentPageIndex(0) is handled by handleRefresh if needed
-      } else if (currentPageIndex !== 0) {
-        setCurrentPageIndex(0);
-        setIsLoading(false); 
-        return;
-      }
-    } else {
-      queryCursor = pageCursorsRef.current[effectivePageIdx] || null;
-    }
-    
+    setSearchTerm(''); // Reset search on full load
     try {
-      const customersQuery = buildPageQuery(queryCursor);
+      const customersQuery = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
       const documentSnapshots = await getDocs(customersQuery);
       const fetchedCustomers: AdminDisplayCustomer[] = [];
-      documentSnapshots.docs.slice(0, PAGE_SIZE).forEach((docSn) => {
+      documentSnapshots.docs.forEach((docSn) => {
         fetchedCustomers.push({ id: docSn.id, ...docSn.data() } as AdminDisplayCustomer);
       });
-      setCustomersOnPage(fetchedCustomers);
-      
-      const newHasNextPage = documentSnapshots.docs.length > PAGE_SIZE;
-      setHasNextPage(newHasNextPage);
-
-      if (newHasNextPage) {
-        const lastDocOnThisPage = documentSnapshots.docs[PAGE_SIZE - 1] as QueryDocumentSnapshot<AdminDisplayCustomer>;
-        setLastFetchedDoc(lastDocOnThisPage);
-      } else {
-        setLastFetchedDoc(null);
-      }
-
+      setAllCustomers(fetchedCustomers);
+      setFilteredCustomers(fetchedCustomers);
     } catch (error) {
       console.error("Error fetching customers: ", error);
-      setCustomersOnPage([]); 
+      setAllCustomers([]);
+      setFilteredCustomers([]);
       toast({
         title: 'Error Fetching Customers',
         description: (error as Error).message || 'Could not load customer data. An index on \'users\' for \'createdAt\' (desc) might be required.',
         variant: 'destructive',
       });
-      setHasNextPage(false);
     } finally {
       setIsLoading(false);
     }
-  }, [toast, buildPageQuery, currentPageIndex, setIsLoading, setCustomersOnPage, setHasNextPage, setLastFetchedDoc, setSearchTerm, setPageCursors]);
+  }, [toast]);
 
   useEffect(() => {
-    const isRefreshForEffect = currentPageIndex === 0 && (pageCursorsRef.current.length <=1 && pageCursorsRef.current[0] === null) && !searchTerm;
-    loadCustomers(currentPageIndex, { isRefresh: isRefreshForEffect });
-  }, [currentPageIndex, loadCustomers, searchTerm]);
-
+    loadCustomers();
+  }, [loadCustomers]);
 
   useEffect(() => {
     const lowercasedFilter = searchTerm.toLowerCase();
-    const currentCustomers = customersOnPage || [];
+    const currentCustomers = allCustomers || [];
 
     if (searchTerm === '') {
       setFilteredCustomers(currentCustomers);
@@ -124,43 +72,14 @@ export default function CustomersPage() {
       });
       setFilteredCustomers(filteredData);
     }
-  }, [searchTerm, customersOnPage]);
-
-  const handleRefresh = useCallback(() => {
-    if (currentPageIndex === 0) {
-      loadCustomers(0, { isRefresh: true });
-    } else {
-      setCurrentPageIndex(0); 
-    }
-  }, [currentPageIndex, loadCustomers]);
-
-  const handleNextPage = () => {
-    if (hasNextPage && lastFetchedDoc) {
-      setPageCursors(prev => {
-        const newCursors = [...prev];
-        newCursors[currentPageIndex + 1] = lastFetchedDoc; 
-        return newCursors;
-      });
-      setCurrentPageIndex(prev => prev + 1);
-    }
-  };
-
-  const handlePrevPage = () => {
-    if (currentPageIndex > 0) {
-      setCurrentPageIndex(prev => prev - 1);
-    }
-  };
+  }, [searchTerm, allCustomers]);
 
   return (
     <>
       <PageHeader
         title="Customers Management"
         description="View and search customer information from the 'users' collection."
-        actions={
-          <Button onClick={handleRefresh} variant="outline" size="icon" aria-label="Refresh customers" disabled={isLoading}>
-            <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-          </Button>
-        }
+        // No refresh button action needed here anymore
       />
       <Card className="shadow-lg">
         <CardHeader>
@@ -184,7 +103,7 @@ export default function CustomersPage() {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 w-full md:w-1/2 lg:w-1/3"
-              disabled={isLoading && (customersOnPage || []).length === 0}
+              disabled={isLoading && (allCustomers || []).length === 0}
             />
           </div>
         </CardHeader>
@@ -201,7 +120,7 @@ export default function CustomersPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {[...Array(Math.min(PAGE_SIZE, 5))].map((_, i) => (
+                {[...Array(5)].map((_, i) => (
                   <TableRow key={`skeleton-${i}`}>
                     <TableCell><Skeleton className="h-5 w-32" /></TableCell>
                     <TableCell><Skeleton className="h-5 w-48" /></TableCell>
@@ -269,33 +188,6 @@ export default function CustomersPage() {
             </Table>
           )}
         </CardContent>
-         {((customersOnPage || []).length > 0 || hasNextPage || currentPageIndex > 0) && !isLoading && (
-            <CardFooter className="flex items-center justify-between p-4 border-t">
-                <span className="text-sm text-muted-foreground">
-                    Page {currentPageIndex + 1}
-                </span>
-                <div className="flex items-center gap-2">
-                    <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handlePrevPage}
-                    disabled={currentPageIndex === 0 || isLoading}
-                    >
-                    <ChevronLeft className="mr-1 h-4 w-4" />
-                    Previous
-                    </Button>
-                    <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleNextPage}
-                    disabled={!hasNextPage || isLoading}
-                    >
-                    Next
-                    <ChevronRight className="ml-1 h-4 w-4" />
-                    </Button>
-                </div>
-            </CardFooter>
-        )}
       </Card>
     </>
   );

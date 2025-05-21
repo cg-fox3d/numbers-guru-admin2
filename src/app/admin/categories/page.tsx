@@ -4,15 +4,15 @@
 import { useEffect, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { MoreHorizontal, Edit, Trash2, PlusCircle, FolderKanban, PackageSearch, RefreshCcw, ChevronLeft, ChevronRight, Search as SearchIcon } from 'lucide-react';
+import { MoreHorizontal, Edit, Trash2, PlusCircle, FolderKanban, PackageSearch, Search as SearchIcon } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { db } from '@/lib/firebase';
-import { collection, query, orderBy, Timestamp, doc, deleteDoc, getDocs, limit, startAfter, QueryDocumentSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, Timestamp, doc, deleteDoc, getDocs } from 'firebase/firestore';
 import type { Category } from '@/types';
 import { format } from 'date-fns';
 import { CategoryDialog } from '@/components/categories/CategoryDialog';
@@ -28,10 +28,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-const PAGE_SIZE = 10;
-
 export default function CategoriesPage() {
-  const [categoriesOnPage, setCategoriesOnPage] = useState<Category[]>([]);
+  const [allCategories, setAllCategories] = useState<Category[]>([]);
   const [filteredCategories, setFilteredCategories] = useState<Category[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -41,73 +39,24 @@ export default function CategoriesPage() {
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
 
-  const [currentPageIndex, setCurrentPageIndex] = useState(0);
-  // pageCursors[i] stores the first document snapshot of page i. pageCursors[0] is always null.
-  const [pageCursors, setPageCursors] = useState<(QueryDocumentSnapshot<Category> | null)[]>([null]);
-  const [hasNextPage, setHasNextPage] = useState(false);
-  const [lastFetchedDoc, setLastFetchedDoc] = useState<QueryDocumentSnapshot<Category> | null>(null);
-
-
-  const buildPageQuery = useCallback((cursor?: QueryDocumentSnapshot<Category> | null) => {
-    let q = query(
-      collection(db, 'categories'),
-      orderBy('order', 'asc'),
-      orderBy('createdAt', 'desc')
-    );
-    if (cursor) {
-      q = query(q, startAfter(cursor));
-    }
-    return query(q, limit(PAGE_SIZE + 1));
-  }, []);
-
-  const loadCategories = useCallback(async (pageIdxToLoad: number, options?: { isRefresh?: boolean }) => {
+  const loadCategories = useCallback(async () => {
     setIsLoading(true);
-    const isActualRefresh = options?.isRefresh || (pageIdxToLoad === 0 && pageCursors.length <= 1 && pageCursors[0] === null);
-
-    let queryCursor: QueryDocumentSnapshot<Category> | null = null;
-    let effectivePageIdx = pageIdxToLoad;
-
-    if (isActualRefresh) {
-      effectivePageIdx = 0;
-      setSearchTerm('');
-      setPageCursors([null]); // Reset cursors
-      setLastFetchedDoc(null);
-      if (currentPageIndex !== 0) setCurrentPageIndex(0);
-    } else {
-      queryCursor = pageCursors[effectivePageIdx] || null;
-    }
-    
+    setSearchTerm(''); // Reset search on full load
     try {
-      const categoriesQuery = buildPageQuery(queryCursor);
+      const categoriesQuery = query(
+        collection(db, 'categories'),
+        orderBy('order', 'asc'),
+        orderBy('createdAt', 'desc')
+      );
       const documentSnapshots = await getDocs(categoriesQuery);
       
       const fetchedCategories: Category[] = [];
-      documentSnapshots.docs.slice(0, PAGE_SIZE).forEach((docSn) => {
+      documentSnapshots.docs.forEach((docSn) => {
         fetchedCategories.push({ id: docSn.id, ...docSn.data() } as Category);
       });
       
-      setCategoriesOnPage(fetchedCategories);
-      
-      const newHasNextPage = documentSnapshots.docs.length > PAGE_SIZE;
-      setHasNextPage(newHasNextPage);
-
-      if (newHasNextPage) {
-        const lastDocOnThisPage = documentSnapshots.docs[PAGE_SIZE - 1] as QueryDocumentSnapshot<Category>;
-        setLastFetchedDoc(lastDocOnThisPage);
-      } else {
-        setLastFetchedDoc(null);
-      }
-
-      // Update pageCursors for the *next* page if we are moving forward
-      // This is implicitly handled by setting lastFetchedDoc and using it in handleNextPage.
-      // pageCursors array stores the *first* doc of each page.
-      if (effectivePageIdx === 0 && fetchedCategories.length > 0 && !pageCursors[0]) {
-         // pageCursors[0] is always null
-      } else if (fetchedCategories.length > 0 && !pageCursors[effectivePageIdx] && effectivePageIdx > 0) {
-        // This logic needs care if we strictly store first doc of each page
-        // For now, handleNextPage primarily uses lastFetchedDoc
-      }
-
+      setAllCategories(fetchedCategories);
+      setFilteredCategories(fetchedCategories); // Initially show all
 
     } catch (error) {
       console.error("Error fetching categories: ", error);
@@ -116,54 +65,29 @@ export default function CategoriesPage() {
         description: (error as Error).message || 'Could not load categories. A Firestore index on \'categories\' for \'order\' (ASC) then \'createdAt\' (DESC) may be required.',
         variant: 'destructive',
       });
-      setHasNextPage(false);
+      setAllCategories([]);
+      setFilteredCategories([]);
     } finally {
       setIsLoading(false);
     }
-  }, [toast, buildPageQuery, currentPageIndex, pageCursors]);
+  }, [toast]);
 
   useEffect(() => {
-    const isRefreshIntent = currentPageIndex === 0 && (pageCursors.length <=1 && pageCursors[0] === null);
-    loadCategories(currentPageIndex, { isRefresh: isRefreshIntent });
-  }, [currentPageIndex, loadCategories]); // `pageCursors` removed to avoid loop on its update by loadCategories
+    loadCategories();
+  }, [loadCategories]);
 
   useEffect(() => {
     if (searchTerm === '') {
-      setFilteredCategories(categoriesOnPage);
+      setFilteredCategories(allCategories);
     } else {
       const lowercasedFilter = searchTerm.toLowerCase();
-      const filteredData = categoriesOnPage.filter(category =>
+      const filteredData = allCategories.filter(category =>
         category.title.toLowerCase().includes(lowercasedFilter) ||
         category.slug.toLowerCase().includes(lowercasedFilter)
       );
       setFilteredCategories(filteredData);
     }
-  }, [searchTerm, categoriesOnPage]);
-
-  const handleRefresh = useCallback(() => {
-    if (currentPageIndex === 0) {
-      loadCategories(0, { isRefresh: true });
-    } else {
-      setCurrentPageIndex(0); // This will trigger the useEffect which calls loadCategories
-    }
-  }, [currentPageIndex, loadCategories]);
-
-  const handleNextPage = () => {
-    if (hasNextPage && lastFetchedDoc) {
-      setPageCursors(prev => {
-        const newCursors = [...prev];
-        newCursors[currentPageIndex + 1] = lastFetchedDoc; // Store cursor for the page we are navigating to
-        return newCursors;
-      });
-      setCurrentPageIndex(prev => prev + 1);
-    }
-  };
-
-  const handlePrevPage = () => {
-    if (currentPageIndex > 0) {
-      setCurrentPageIndex(prev => prev - 1);
-    }
-  };
+  }, [searchTerm, allCategories]);
   
   const handleAddNewCategory = () => {
     setEditingCategory(null);
@@ -192,8 +116,7 @@ export default function CategoriesPage() {
         title: 'Category Deleted',
         description: `Category "${categoryToDelete.title}" has been successfully deleted.`,
       });
-      // Refresh current page. If it became empty, ideally navigate or handle.
-      loadCategories(currentPageIndex, {isRefresh: currentPageIndex === 0 && categoriesOnPage.length === 1});
+      loadCategories(); // Re-fetch all categories
     } catch (error) {
       console.error("Error deleting category: ", error);
       toast({
@@ -208,8 +131,8 @@ export default function CategoriesPage() {
   };
   
   const onDialogSuccess = useCallback(() => {
-    loadCategories(currentPageIndex, { isRefresh: currentPageIndex === 0 });
-  }, [currentPageIndex, loadCategories]);
+    loadCategories(); // Re-fetch all categories on success
+  }, [loadCategories]);
 
 
   return (
@@ -218,14 +141,9 @@ export default function CategoriesPage() {
         title="Categories Management"
         description="Manage product categories for your shop."
         actions={
-          <div className="flex items-center gap-2">
-            <Button onClick={handleRefresh} variant="outline" size="icon" aria-label="Refresh categories" disabled={isLoading}>
-              <RefreshCcw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-            </Button>
-            <Button onClick={handleAddNewCategory} className="bg-primary hover:bg-primary/90">
-              <PlusCircle className="mr-2 h-4 w-4" /> Add New Category
-            </Button>
-          </div>
+          <Button onClick={handleAddNewCategory} className="bg-primary hover:bg-primary/90">
+            <PlusCircle className="mr-2 h-4 w-4" /> Add New Category
+          </Button>
         }
       />
       <div className="mb-4 relative">
@@ -236,7 +154,7 @@ export default function CategoriesPage() {
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="pl-10 w-full md:w-1/2 lg:w-1/3"
-          disabled={isLoading && categoriesOnPage.length === 0}
+          disabled={isLoading && allCategories.length === 0}
         />
       </div>
       <Card className="shadow-lg">
@@ -253,7 +171,7 @@ export default function CategoriesPage() {
         <CardContent className="p-0">
           {isLoading && filteredCategories.length === 0 ? (
             <div className="p-6 space-y-2">
-              {[...Array(Math.max(1, Math.floor(PAGE_SIZE / 2)))].map((_, i) => ( 
+              {[...Array(5)].map((_, i) => ( 
                 <div key={i} className="flex items-center justify-between p-2 border rounded-md">
                   <div className="flex-1 space-y-1">
                     <Skeleton className="h-5 w-1/3" />
@@ -273,7 +191,7 @@ export default function CategoriesPage() {
               <p className="text-muted-foreground">
                 {searchTerm ? 'Try a different search term or clear search.' : 'Create your first category to see it listed here.'}
               </p>
-              {!searchTerm && categoriesOnPage.length === 0 && ( 
+              {!searchTerm && allCategories.length === 0 && ( 
                 <Button onClick={handleAddNewCategory} className="mt-4 bg-primary hover:bg-primary/90">
                   <PlusCircle className="mr-2 h-4 w-4" /> Add First Category
                 </Button>
@@ -333,33 +251,6 @@ export default function CategoriesPage() {
             </Table>
           )}
         </CardContent>
-        {(categoriesOnPage.length > 0 || hasNextPage || currentPageIndex > 0) && !isLoading && (
-            <CardFooter className="flex items-center justify-between p-4 border-t">
-                <span className="text-sm text-muted-foreground">
-                    Page {currentPageIndex + 1}
-                </span>
-                <div className="flex items-center gap-2">
-                    <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handlePrevPage}
-                    disabled={currentPageIndex === 0 || isLoading}
-                    >
-                    <ChevronLeft className="mr-1 h-4 w-4" />
-                    Previous
-                    </Button>
-                    <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleNextPage}
-                    disabled={!hasNextPage || isLoading}
-                    >
-                    Next
-                    <ChevronRight className="ml-1 h-4 w-4" />
-                    </Button>
-                </div>
-            </CardFooter>
-        )}
       </Card>
 
       {isDialogOpen && (
