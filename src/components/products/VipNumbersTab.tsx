@@ -3,15 +3,15 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, query, orderBy, Timestamp, doc, deleteDoc, getDocs } from 'firebase/firestore';
+import { collection, query, orderBy, Timestamp, doc, deleteDoc, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
 import type { VipNumber } from '@/types';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { MoreHorizontal, Edit, Trash2, PackageSearch, PlusCircle, Search as SearchIcon } from 'lucide-react';
+import { MoreHorizontal, Edit, Trash2, PackageSearch, PlusCircle, Search as SearchIcon, RefreshCcw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { VipNumberDialog } from '@/components/products/dialogs/VipNumberDialog';
@@ -31,8 +31,10 @@ interface VipNumbersTabProps {
   categoryMap: Record<string, string>;
 }
 
+const PAGE_SIZE = 10;
+
 export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
-  const [allVipNumbers, setAllVipNumbers] = useState<VipNumber[]>([]);
+  const [vipNumbersOnPage, setVipNumbersOnPage] = useState<VipNumber[]>([]);
   const [filteredVipNumbers, setFilteredVipNumbers] = useState<VipNumber[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -42,18 +44,73 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const { toast } = useToast();
 
-  const loadVipNumbers = useCallback(async () => {
+  const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  const [pageStartCursors, setPageStartCursors] = useState<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
+  const [lastVisibleDoc, setLastVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [firstVisibleDoc, setFirstVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [hasNextPage, setHasNextPage] = useState(false);
+
+  const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null, direction: 'next' | 'prev' | 'current' = 'next') => {
+    let q = query(collection(db, 'vipNumbers'), orderBy('createdAt', 'desc'));
+
+    if (cursor) {
+      if (direction === 'next') {
+        q = query(q, startAfter(cursor), limit(PAGE_SIZE + 1));
+      } else if (direction === 'prev') {
+        // For 'prev', cursor is the start of the target previous page.
+        q = query(q, startAfter(cursor), limit(PAGE_SIZE + 1));
+      }
+    } else {
+      // First page or refresh
+      q = query(q, limit(PAGE_SIZE + 1));
+    }
+    return q;
+  }, []);
+
+  const loadVipNumbers = useCallback(async (pageIdxToLoad: number, options: { isRefresh?: boolean } = {}) => {
     setIsLoading(true);
-    setSearchTerm(''); // Reset search on full load
+    if (options.isRefresh) {
+      setSearchTerm('');
+    }
+
     try {
-      const vipNumbersQuery = query(collection(db, 'vipNumbers'), orderBy('createdAt', 'desc'));
+      let queryCursor: QueryDocumentSnapshot<DocumentData> | null = null;
+
+      if (options.isRefresh || pageIdxToLoad === 0) {
+        queryCursor = null;
+      } else if (pageIdxToLoad > 0 && pageIdxToLoad < pageStartCursors.length) {
+        queryCursor = pageStartCursors[pageIdxToLoad];
+      } else if (pageIdxToLoad > 0 && lastVisibleDoc && pageIdxToLoad === pageStartCursors.length) {
+        queryCursor = lastVisibleDoc;
+      }
+      
+      const vipNumbersQuery = buildPageQuery(queryCursor, options.isRefresh || pageIdxToLoad === 0 ? 'current' : (pageIdxToLoad > currentPageIndex ? 'next' : 'prev') );
       const documentSnapshots = await getDocs(vipNumbersQuery);
-      const numbers: VipNumber[] = [];
-      documentSnapshots.docs.forEach((docSn) => {
-        numbers.push({ id: docSn.id, ...docSn.data() } as VipNumber);
+
+      const fetchedVipNumbers: VipNumber[] = [];
+      documentSnapshots.docs.slice(0, PAGE_SIZE).forEach((docSn) => {
+        fetchedVipNumbers.push({ id: docSn.id, ...docSn.data() } as VipNumber);
       });
-      setAllVipNumbers(numbers);
-      setFilteredVipNumbers(numbers);
+      
+      setVipNumbersOnPage(fetchedVipNumbers);
+
+      const newFirstVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null;
+      setFirstVisibleDoc(newFirstVisibleDoc);
+      
+      const newLastVisibleDoc = documentSnapshots.docs.length > PAGE_SIZE
+        ? documentSnapshots.docs[PAGE_SIZE - 1]
+        : (documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null);
+      setLastVisibleDoc(newLastVisibleDoc);
+
+      const newHasNextPage = documentSnapshots.docs.length > PAGE_SIZE;
+      setHasNextPage(newHasNextPage);
+
+      if (options.isRefresh || pageIdxToLoad === 0) {
+        setPageStartCursors([null, newFirstVisibleDoc].filter(c => c !== undefined) as (QueryDocumentSnapshot<DocumentData> | null)[]);
+      } else if (pageIdxToLoad >= pageStartCursors.length && newFirstVisibleDoc) {
+        setPageStartCursors(prev => [...prev, newFirstVisibleDoc]);
+      }
+      
     } catch (error) {
       console.error("Error fetching VIP numbers: ", error);
       toast({
@@ -61,28 +118,28 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
         description: (error as Error).message || 'Could not load VIP numbers. An index on \'vipNumbers\' for \'createdAt\' (desc) might be required.',
         variant: 'destructive',
       });
-      setAllVipNumbers([]);
-      setFilteredVipNumbers([]);
+      setVipNumbersOnPage([]);
+      setHasNextPage(false);
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
-  
-  useEffect(() => {
-    loadVipNumbers();
-  }, [loadVipNumbers]);
+  }, [toast, buildPageQuery, currentPageIndex]); // currentPageIndex to re-evaluate cursor logic if direction depends on it.
 
   useEffect(() => {
-    const lowercasedFilter = searchTerm.toLowerCase();
+    loadVipNumbers(currentPageIndex, {isRefresh: currentPageIndex === 0 && pageStartCursors.length <=1 });
+  }, [currentPageIndex, loadVipNumbers]);
+
+  useEffect(() => {
     if (searchTerm === '') {
-        setFilteredVipNumbers(allVipNumbers);
+      setFilteredVipNumbers(vipNumbersOnPage);
     } else {
-        const filteredData = allVipNumbers.filter(item =>
+      const lowercasedFilter = searchTerm.toLowerCase();
+      const filteredData = (vipNumbersOnPage || []).filter(item =>
         item.number.toLowerCase().includes(lowercasedFilter)
-        );
-        setFilteredVipNumbers(filteredData);
+      );
+      setFilteredVipNumbers(filteredData);
     }
-  }, [searchTerm, allVipNumbers]);
+  }, [searchTerm, vipNumbersOnPage]);
 
   const handleAddNewVipNumber = () => {
     setEditingVipNumber(null);
@@ -111,7 +168,11 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
         title: 'VIP Number Deleted',
         description: `VIP Number "${vipNumberToDelete.number}" has been successfully deleted.`,
       });
-      loadVipNumbers(); // Re-fetch all data
+      if (vipNumbersOnPage.length === 1 && currentPageIndex > 0) {
+        setCurrentPageIndex(prev => prev -1);
+      } else {
+        loadVipNumbers(currentPageIndex, { isRefresh: true });
+      }
     } catch (error) {
       console.error("Error deleting VIP Number: ", error);
       toast({
@@ -126,8 +187,28 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
   };
 
   const onDialogSuccess = useCallback(() => {
-    loadVipNumbers(); // Re-fetch all data
-  }, [loadVipNumbers]);
+    loadVipNumbers(currentPageIndex, { isRefresh: true });
+  }, [loadVipNumbers, currentPageIndex]);
+
+  const handleRefresh = useCallback(() => {
+    if (currentPageIndex === 0) {
+        loadVipNumbers(0, { isRefresh: true });
+    } else {
+        setCurrentPageIndex(0); // This will trigger useEffect to load page 0
+    }
+  }, [loadVipNumbers, currentPageIndex]);
+
+  const handleNextPage = () => {
+    if (hasNextPage) {
+      setCurrentPageIndex(prev => prev + 1);
+    }
+  };
+
+  const handlePrevPage = () => {
+    if (currentPageIndex > 0) {
+      setCurrentPageIndex(prev => prev - 1);
+    }
+  };
 
   return (
     <Card className="shadow-lg">
@@ -137,69 +218,60 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
             <CardTitle>VIP Numbers List</CardTitle>
             <CardDescription>Browse and manage individual VIP mobile numbers. An index on 'createdAt' (desc) might be required.</CardDescription>
           </div>
-          <Button 
-            onClick={handleAddNewVipNumber} 
-            className="bg-primary hover:bg-primary/90"
-          >
-            <PlusCircle className="mr-2 h-4 w-4" /> Add New VIP Number
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading}>
+              <RefreshCcw className="h-4 w-4" />
+              <span className="sr-only">Refresh</span>
+            </Button>
+            <Button onClick={handleAddNewVipNumber} className="bg-primary hover:bg-primary/90" disabled={isLoading}>
+              <PlusCircle className="mr-2 h-4 w-4" /> Add New VIP Number
+            </Button>
+          </div>
         </div>
         <div className="mt-4 relative">
           <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
           <Input
             type="search"
-            placeholder="Search by number..."
+            placeholder="Search by number on current page..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="pl-10 w-full md:w-1/2 lg:w-1/3"
-            disabled={isLoading && allVipNumbers.length === 0}
+            disabled={isLoading && (vipNumbersOnPage || []).length === 0}
           />
         </div>
       </CardHeader>
-      <CardContent className="p-0">
-        {isLoading && filteredVipNumbers.length === 0 ? (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Number</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Price (₹)</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="hidden lg:table-cell">Created At</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {[...Array(3)].map((_, i) => (
-                <TableRow key={`skeleton-${i}`}>
-                  <TableCell><Skeleton className="h-5 w-24" /></TableCell>
-                  <TableCell><Skeleton className="h-5 w-20" /></TableCell>
-                  <TableCell><Skeleton className="h-5 w-16" /></TableCell>
-                  <TableCell><Skeleton className="h-6 w-20 rounded-full" /></TableCell>
-                  <TableCell className="hidden lg:table-cell"><Skeleton className="h-5 w-28" /></TableCell>
-                  <TableCell className="text-right"><Skeleton className="h-8 w-8 ml-auto" /></TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        ) : !isLoading && filteredVipNumbers.length === 0 ? (
-          <div className="flex flex-col items-center justify-center text-center p-10">
+      <CardContent className="p-0 min-h-[300px]">
+        {isLoading ? (
+          <div className="p-6 space-y-2">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="flex items-center justify-between p-2 border rounded-md">
+                <div className="flex-1 space-y-1">
+                  <Skeleton className="h-5 w-1/3" />
+                  <Skeleton className="h-4 w-1/4" />
+                </div>
+                <Skeleton className="h-5 w-16" />
+                <Skeleton className="h-8 w-8 ml-4" />
+              </div>
+            ))}
+          </div>
+        ) : !isLoading && (filteredVipNumbers || []).length === 0 ? (
+          <div className="flex flex-col items-center justify-center text-center p-10 min-h-[300px]">
             <PackageSearch className="h-12 w-12 text-muted-foreground mb-4" />
             <h3 className="text-xl font-semibold">
-              {searchTerm ? 'No VIP Numbers Match Your Search' : 'No VIP Numbers Found'}
+              {searchTerm ? 'No VIP Numbers Match Your Search' : 
+               (vipNumbersOnPage || []).length === 0 ? 'No VIP Numbers Found' : 'No VIP Numbers Match Your Search'}
             </h3>
             <p className="text-muted-foreground">
-              {searchTerm ? 'Try a different search term.' : 'Add your first VIP number to see it listed here.'}
+              {searchTerm ? 'Try a different search term or clear search.' : 
+               (vipNumbersOnPage || []).length === 0 ? 'Add your first VIP number to see it listed here.' : 'Adjust your search or add more VIP numbers.'}
             </p>
-             {!searchTerm && allVipNumbers.length === 0 && ( 
-                <Button onClick={handleAddNewVipNumber} className="mt-4 bg-primary hover:bg-primary/90">
-                  <PlusCircle className="mr-2 h-4 w-4" /> Add First VIP Number
-                </Button>
-              )}
+            {!searchTerm && (vipNumbersOnPage || []).length === 0 && ( 
+              <Button onClick={handleAddNewVipNumber} className="mt-4 bg-primary hover:bg-primary/90">
+                <PlusCircle className="mr-2 h-4 w-4" /> Add First VIP Number
+              </Button>
+            )}
           </div>
-        ) : null}
-
-        {!isLoading && filteredVipNumbers.length > 0 && (
+        ) : (
           <Table>
             <TableHeader>
               <TableRow>
@@ -214,7 +286,7 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredVipNumbers.map((product) => (
+              {(filteredVipNumbers || []).map((product) => (
                 <TableRow key={product.id}>
                   <TableCell className="font-medium">{product.number}</TableCell>
                   <TableCell>{categoryMap[product.categorySlug] || product.categorySlug}</TableCell>
@@ -264,6 +336,32 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
         )}
       </CardContent>
 
+      {(vipNumbersOnPage || []).length > 0 && (
+        <CardFooter className="flex items-center justify-between p-4 border-t">
+          <span className="text-sm text-muted-foreground">
+            Page {currentPageIndex + 1}
+          </span>
+          <div className="flex gap-2">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handlePrevPage} 
+              disabled={currentPageIndex === 0 || isLoading}
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" /> Previous
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleNextPage} 
+              disabled={!hasNextPage || isLoading}
+            >
+              Next <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
+        </CardFooter>
+      )}
+
       {isDialogOpen && (
         <VipNumberDialog
           isOpen={isDialogOpen}
@@ -300,3 +398,4 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
     </Card>
   );
 }
+    

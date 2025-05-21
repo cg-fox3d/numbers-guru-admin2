@@ -3,15 +3,15 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, query, orderBy, Timestamp, doc, deleteDoc, getDocs } from 'firebase/firestore';
+import { collection, query, orderBy, Timestamp, doc, deleteDoc, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
 import type { NumberPack } from '@/types';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { MoreHorizontal, Edit, Trash2, PackageSearch, PlusCircle, Search as SearchIcon } from 'lucide-react';
+import { MoreHorizontal, Edit, Trash2, PackageSearch, PlusCircle, Search as SearchIcon, RefreshCcw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { NumberPackDialog } from '@/components/products/dialogs/NumberPackDialog';
@@ -31,8 +31,10 @@ interface NumberPacksTabProps {
   categoryMap: Record<string, string>;
 }
 
+const PAGE_SIZE = 10;
+
 export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
-  const [allNumberPacks, setAllNumberPacks] = useState<NumberPack[]>([]);
+  const [numberPacksOnPage, setNumberPacksOnPage] = useState<NumberPack[]>([]);
   const [filteredNumberPacks, setFilteredNumberPacks] = useState<NumberPack[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -42,47 +44,100 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const { toast } = useToast();
 
-  const loadNumberPacks = useCallback(async () => {
+  const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  const [pageStartCursors, setPageStartCursors] = useState<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
+  const [lastVisibleDoc, setLastVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [firstVisibleDoc, setFirstVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [hasNextPage, setHasNextPage] = useState(false);
+
+  const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null, direction: 'next' | 'prev' | 'current' = 'next') => {
+    let q = query(collection(db, 'numberPacks'), orderBy('createdAt', 'desc'));
+    
+    if (cursor) {
+      if (direction === 'next') {
+        q = query(q, startAfter(cursor), limit(PAGE_SIZE + 1));
+      } else if (direction === 'prev') {
+        q = query(q, startAfter(cursor), limit(PAGE_SIZE + 1));
+      }
+    } else {
+      q = query(q, limit(PAGE_SIZE + 1));
+    }
+    return q;
+  }, []);
+
+  const loadNumberPacks = useCallback(async (pageIdxToLoad: number, options: { isRefresh?: boolean } = {}) => {
     setIsLoading(true);
-    setSearchTerm(''); // Reset search on full load
+    if (options.isRefresh) {
+      setSearchTerm('');
+    }
+
     try {
-      const numberPacksQuery = query(collection(db, 'numberPacks'), orderBy('createdAt', 'desc'));
-      const documentSnapshots = await getDocs(numberPacksQuery);
-      const packs: NumberPack[] = [];
-      documentSnapshots.docs.forEach((docSn) => {
-        packs.push({ id: docSn.id, ...docSn.data() } as NumberPack);
+      let queryCursor: QueryDocumentSnapshot<DocumentData> | null = null;
+
+      if (options.isRefresh || pageIdxToLoad === 0) {
+        queryCursor = null;
+      } else if (pageIdxToLoad > 0 && pageIdxToLoad < pageStartCursors.length) {
+        queryCursor = pageStartCursors[pageIdxToLoad];
+      } else if (pageIdxToLoad > 0 && lastVisibleDoc && pageIdxToLoad === pageStartCursors.length) {
+        queryCursor = lastVisibleDoc;
+      }
+
+      const packsQuery = buildPageQuery(queryCursor, options.isRefresh || pageIdxToLoad === 0 ? 'current' : (pageIdxToLoad > currentPageIndex ? 'next' : 'prev') );
+      const documentSnapshots = await getDocs(packsQuery);
+
+      const fetchedPacks: NumberPack[] = [];
+      documentSnapshots.docs.slice(0, PAGE_SIZE).forEach((docSn) => {
+        fetchedPacks.push({ id: docSn.id, ...docSn.data() } as NumberPack);
       });
-      setAllNumberPacks(packs);
-      setFilteredNumberPacks(packs);
+
+      setNumberPacksOnPage(fetchedPacks);
+
+      const newFirstVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null;
+      setFirstVisibleDoc(newFirstVisibleDoc);
+
+      const newLastVisibleDoc = documentSnapshots.docs.length > PAGE_SIZE
+        ? documentSnapshots.docs[PAGE_SIZE - 1]
+        : (documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null);
+      setLastVisibleDoc(newLastVisibleDoc);
+      
+      const newHasNextPage = documentSnapshots.docs.length > PAGE_SIZE;
+      setHasNextPage(newHasNextPage);
+      
+      if (options.isRefresh || pageIdxToLoad === 0) {
+        setPageStartCursors([null, newFirstVisibleDoc].filter(c => c !== undefined) as (QueryDocumentSnapshot<DocumentData> | null)[]);
+      } else if (pageIdxToLoad >= pageStartCursors.length && newFirstVisibleDoc) {
+        setPageStartCursors(prev => [...prev, newFirstVisibleDoc]);
+      }
+
     } catch (error) {
       console.error("Error fetching number packs: ", error);
-      setAllNumberPacks([]);
-      setFilteredNumberPacks([]);
       toast({
         title: 'Error Fetching Number Packs',
         description: (error as Error).message || 'Could not load number packs. An index on \'numberPacks\' for \'createdAt\' (desc) might be required.',
         variant: 'destructive',
       });
+      setNumberPacksOnPage([]);
+      setHasNextPage(false);
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast, buildPageQuery, currentPageIndex]);
 
   useEffect(() => {
-    loadNumberPacks();
-  }, [loadNumberPacks]);
+    loadNumberPacks(currentPageIndex, {isRefresh: currentPageIndex === 0 && pageStartCursors.length <=1 });
+  }, [currentPageIndex, loadNumberPacks]);
 
   useEffect(() => {
-    const lowercasedFilter = searchTerm.toLowerCase();
-     if (searchTerm === '') {
-        setFilteredNumberPacks(allNumberPacks);
+    if (searchTerm === '') {
+      setFilteredNumberPacks(numberPacksOnPage);
     } else {
-        const filteredData = allNumberPacks.filter(item =>
+      const lowercasedFilter = searchTerm.toLowerCase();
+      const filteredData = (numberPacksOnPage || []).filter(item =>
         item.name.toLowerCase().includes(lowercasedFilter)
-        );
-        setFilteredNumberPacks(filteredData);
+      );
+      setFilteredNumberPacks(filteredData);
     }
-  }, [searchTerm, allNumberPacks]);
+  }, [searchTerm, numberPacksOnPage]);
 
   const handleAddNewPack = () => {
     setEditingNumberPack(null);
@@ -111,7 +166,11 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
         title: 'Number Pack Deleted',
         description: `Pack "${packToDelete.name}" has been successfully deleted.`,
       });
-      loadNumberPacks(); // Re-fetch all data
+      if (numberPacksOnPage.length === 1 && currentPageIndex > 0) {
+        setCurrentPageIndex(prev => prev -1);
+      } else {
+        loadNumberPacks(currentPageIndex, { isRefresh: true });
+      }
     } catch (error) {
       console.error("Error deleting number pack: ", error);
       toast({
@@ -126,140 +185,177 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
   };
 
   const onDialogSuccess = useCallback(() => {
-    loadNumberPacks(); // Re-fetch all data
-  }, [loadNumberPacks]);
+    loadNumberPacks(currentPageIndex, { isRefresh: true });
+  }, [loadNumberPacks, currentPageIndex]);
+  
+  const handleRefresh = useCallback(() => {
+    if (currentPageIndex === 0) {
+        loadNumberPacks(0, { isRefresh: true });
+    } else {
+        setCurrentPageIndex(0); 
+    }
+  }, [loadNumberPacks, currentPageIndex]);
+
+  const handleNextPage = () => {
+    if (hasNextPage) {
+      setCurrentPageIndex(prev => prev + 1);
+    }
+  };
+
+  const handlePrevPage = () => {
+    if (currentPageIndex > 0) {
+      setCurrentPageIndex(prev => prev - 1);
+    }
+  };
   
   return (
     <Card className="shadow-lg">
       <CardHeader>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div>
-                <CardTitle>Number Packs List</CardTitle>
-                <CardDescription>Browse and manage number pack bundles. An index on 'numberPacks' for 'createdAt' (desc) might be required.</CardDescription>
-            </div>
-            <Button onClick={handleAddNewPack} className="bg-primary hover:bg-primary/90">
+          <div>
+            <CardTitle>Number Packs List</CardTitle>
+            <CardDescription>Browse and manage number pack bundles. An index on 'numberPacks' for 'createdAt' (desc) might be required.</CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading}>
+              <RefreshCcw className="h-4 w-4" />
+              <span className="sr-only">Refresh</span>
+            </Button>
+            <Button onClick={handleAddNewPack} className="bg-primary hover:bg-primary/90" disabled={isLoading}>
                 <PlusCircle className="mr-2 h-4 w-4" /> Add New Pack
             </Button>
+          </div>
         </div>
         <div className="mt-4 relative">
           <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
           <Input
             type="search"
-            placeholder="Search by pack name..."
+            placeholder="Search by pack name on current page..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="pl-10 w-full md:w-1/2 lg:w-1/3"
-            disabled={isLoading && allNumberPacks.length === 0}
+            disabled={isLoading && (numberPacksOnPage || []).length === 0}
           />
         </div>
       </CardHeader>
-      <CardContent className="p-0">
-        {isLoading && filteredNumberPacks.length === 0 ? (
-             <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Pack Name</TableHead>
-                    <TableHead>Items</TableHead>
-                    <TableHead>Price (₹)</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead className="hidden lg:table-cell">Created At</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {[...Array(3)].map((_, i) => (
-                    <TableRow key={`skeleton-${i}`}>
-                      <TableCell><Skeleton className="h-5 w-32" /></TableCell>
-                      <TableCell><Skeleton className="h-5 w-12" /></TableCell>
-                      <TableCell><Skeleton className="h-5 w-20" /></TableCell>
-                      <TableCell><Skeleton className="h-6 w-20 rounded-full" /></TableCell>
-                      <TableCell><Skeleton className="h-5 w-24" /></TableCell>
-                      <TableCell className="hidden lg:table-cell"><Skeleton className="h-5 w-28" /></TableCell>
-                      <TableCell className="text-right"><Skeleton className="h-8 w-8 ml-auto" /></TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-             </Table>
-        ): !isLoading && filteredNumberPacks.length === 0 ? (
-          <div className="flex flex-col items-center justify-center text-center p-10">
+      <CardContent className="p-0 min-h-[300px]">
+        {isLoading ? (
+          <div className="p-6 space-y-2">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="flex items-center justify-between p-2 border rounded-md">
+                <div className="flex-1 space-y-1">
+                  <Skeleton className="h-5 w-1/3" />
+                  <Skeleton className="h-4 w-1/4" />
+                </div>
+                <Skeleton className="h-5 w-16" />
+                <Skeleton className="h-8 w-8 ml-4" />
+              </div>
+            ))}
+          </div>
+        ) : !isLoading && (filteredNumberPacks || []).length === 0 ? (
+          <div className="flex flex-col items-center justify-center text-center p-10 min-h-[300px]">
             <PackageSearch className="h-12 w-12 text-muted-foreground mb-4" />
             <h3 className="text-xl font-semibold">
-              {searchTerm ? 'No Number Packs Match Your Search' : 'No Number Packs Found'}
+              {searchTerm ? 'No Number Packs Match Your Search' : 
+               (numberPacksOnPage || []).length === 0 ? 'No Number Packs Found' : 'No Number Packs Match Your Search'}
             </h3>
             <p className="text-muted-foreground">
-              {searchTerm ? 'Try a different search term.' : 'Create your first number pack to see it listed here.'}
+              {searchTerm ? 'Try a different search term or clear search.' : 
+               (numberPacksOnPage || []).length === 0 ? 'Create your first number pack to see it listed here.' : 'Adjust your search or add more packs.'}
             </p>
-            {!searchTerm && allNumberPacks.length === 0 && ( 
-                <Button onClick={handleAddNewPack} className="mt-4 bg-primary hover:bg-primary/90">
-                  <PlusCircle className="mr-2 h-4 w-4" /> Add First Number Pack
-                </Button>
-              )}
+            {!searchTerm && (numberPacksOnPage || []).length === 0 && ( 
+              <Button onClick={handleAddNewPack} className="mt-4 bg-primary hover:bg-primary/90">
+                <PlusCircle className="mr-2 h-4 w-4" /> Add First Number Pack
+              </Button>
+            )}
           </div>
-        ) : null}
-        
-        {!isLoading && filteredNumberPacks.length > 0 && (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Pack Name</TableHead>
-                  <TableHead>Items</TableHead>
-                  <TableHead>Pack Price (₹)</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead className="hidden lg:table-cell max-w-xs truncate">Description</TableHead>
-                  <TableHead className="hidden lg:table-cell">Created At</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Pack Name</TableHead>
+                <TableHead>Items</TableHead>
+                <TableHead>Pack Price (₹)</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Category</TableHead>
+                <TableHead className="hidden lg:table-cell max-w-xs truncate">Description</TableHead>
+                <TableHead className="hidden lg:table-cell">Created At</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(filteredNumberPacks || []).map((pack) => (
+                <TableRow key={pack.id}>
+                  <TableCell className="font-medium">{pack.name}</TableCell>
+                  <TableCell>{pack.numbers?.length || 0}</TableCell>
+                  <TableCell>{pack.packPrice.toLocaleString()}</TableCell>
+                  <TableCell>
+                    <Badge 
+                      variant={pack.status === 'available' ? 'default' : 'destructive'}
+                      className="capitalize"
+                    >
+                      {pack.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{categoryMap[pack.categorySlug] || pack.categorySlug}</TableCell>
+                  <TableCell className="hidden lg:table-cell max-w-xs truncate">{pack.description || 'N/A'}</TableCell>
+                  <TableCell className="hidden lg:table-cell">
+                    {pack.createdAt instanceof Timestamp 
+                      ? format(pack.createdAt.toDate(), 'PPp') 
+                      : typeof pack.createdAt === 'string' 
+                        ? pack.createdAt 
+                        : 'N/A'}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" className="h-8 w-8 p-0">
+                          <span className="sr-only">Open menu</span>
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleEditPack(pack)}>
+                          <Edit className="mr-2 h-4 w-4" /> Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => openDeleteConfirmDialog(pack)} className="text-destructive focus:text-destructive focus:bg-destructive/10">
+                          <Trash2 className="mr-2 h-4 w-4" /> Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredNumberPacks.map((pack) => (
-                  <TableRow key={pack.id}>
-                    <TableCell className="font-medium">{pack.name}</TableCell>
-                    <TableCell>{pack.numbers?.length || 0}</TableCell>
-                    <TableCell>{pack.packPrice.toLocaleString()}</TableCell>
-                    <TableCell>
-                      <Badge 
-                        variant={pack.status === 'available' ? 'default' : 'destructive'}
-                        className="capitalize"
-                      >
-                        {pack.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{categoryMap[pack.categorySlug] || pack.categorySlug}</TableCell>
-                    <TableCell className="hidden lg:table-cell max-w-xs truncate">{pack.description || 'N/A'}</TableCell>
-                    <TableCell className="hidden lg:table-cell">
-                      {pack.createdAt instanceof Timestamp 
-                        ? format(pack.createdAt.toDate(), 'PPp') 
-                        : typeof pack.createdAt === 'string' 
-                          ? pack.createdAt 
-                          : 'N/A'}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
-                            <span className="sr-only">Open menu</span>
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleEditPack(pack)}>
-                            <Edit className="mr-2 h-4 w-4" /> Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => openDeleteConfirmDialog(pack)} className="text-destructive focus:text-destructive focus:bg-destructive/10">
-                            <Trash2 className="mr-2 h-4 w-4" /> Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )
-        }
+              ))}
+            </TableBody>
+          </Table>
+        )}
       </CardContent>
+
+      {(numberPacksOnPage || []).length > 0 && (
+        <CardFooter className="flex items-center justify-between p-4 border-t">
+          <span className="text-sm text-muted-foreground">
+            Page {currentPageIndex + 1}
+          </span>
+          <div className="flex gap-2">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handlePrevPage} 
+              disabled={currentPageIndex === 0 || isLoading}
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" /> Previous
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleNextPage} 
+              disabled={!hasNextPage || isLoading}
+            >
+              Next <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
+        </CardFooter>
+      )}
 
       {isDialogOpen && (
         <NumberPackDialog
@@ -297,3 +393,4 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
     </Card>
   );
 }
+    
