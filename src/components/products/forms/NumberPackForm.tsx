@@ -17,6 +17,7 @@ import type { NumberPackFormData, NumberPackItemFormData, VipNumber } from '@/ty
 import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
 
 interface NumberPackFormProps {
   form: UseFormReturn<NumberPackFormData>;
@@ -26,7 +27,7 @@ interface NumberPackFormProps {
 }
 
 export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: NumberPackFormProps) {
-  const { fields, append, remove } = useFieldArray({ // 'update' was removed as it's not used
+  const { fields, append, remove } = useFieldArray({
     control: form.control,
     name: "numbers",
   });
@@ -35,6 +36,7 @@ export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: Number
   const [isLoadingVips, setIsLoadingVips] = useState(false);
   const [isVipComboboxOpen, setIsVipComboboxOpen] = useState(false);
   const [vipSearchTerm, setVipSearchTerm] = useState("");
+  const { toast } = useToast();
 
   useEffect(() => {
     const fetchVips = async () => {
@@ -49,14 +51,29 @@ export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: Number
         setAvailableVips(vips);
       } catch (error) {
         console.error("Error fetching available VIP numbers: ", error);
+        toast({
+          title: "Error Fetching VIPs",
+          description: "Could not load available VIP numbers for selection.",
+          variant: "destructive",
+        });
       } finally {
         setIsLoadingVips(false);
       }
     };
     fetchVips();
-  }, []);
+  }, [toast]);
 
   const handleAddVipToPack = (vip: VipNumber) => {
+    const isAlreadyAdded = fields.some(field => field.originalVipNumberId === vip.id);
+    if (isAlreadyAdded) {
+      toast({
+        title: "Already Added",
+        description: `VIP Number "${vip.number}" is already in this pack.`,
+        variant: "default" 
+      });
+      return;
+    }
+
     append({
       originalVipNumberId: vip.id,
       number: vip.number,
@@ -225,7 +242,7 @@ export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: Number
             <Popover open={isVipComboboxOpen} onOpenChange={setIsVipComboboxOpen}>
               <PopoverTrigger asChild>
                 <Button
-                  type="button" // Ensure it's not a submit button
+                  type="button" 
                   variant="outline"
                   role="combobox"
                   aria-expanded={isVipComboboxOpen}
@@ -240,29 +257,36 @@ export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: Number
                 <Command>
                   <CommandInput 
                     placeholder="Search VIP number..."
-                    // value prop removed to let CMDK handle internal state
-                    onValueChange={setVipSearchTerm} // Use onValueChange for filtering logic if needed outside CMDK
+                    onValueChange={setVipSearchTerm} 
                   />
                   <CommandList>
                     <CommandEmpty>No VIP number found.</CommandEmpty>
                     <CommandGroup>
                       {availableVips
-                        .filter(vip => vip.number.toLowerCase().includes(vipSearchTerm.toLowerCase())) // Manual filter
-                        .map((vip) => (
-                        <CommandItem
-                          key={vip.id}
-                          value={vip.number} 
-                          onSelect={() => handleAddVipToPack(vip)}
-                        >
-                          <CheckIcon
-                            className={cn(
-                              "mr-2 h-4 w-4",
-                              fields.some(field => field.originalVipNumberId === vip.id) ? "opacity-100" : "opacity-0"
-                            )}
-                          />
-                          {vip.number} (₹{vip.price.toLocaleString()})
-                        </CommandItem>
-                      ))}
+                        .filter(vip => vip.number.toLowerCase().includes(vipSearchTerm.toLowerCase()))
+                        .map((vip) => {
+                          const isAlreadyInPack = fields.some(field => field.originalVipNumberId === vip.id);
+                          return (
+                            <CommandItem
+                              key={vip.id}
+                              value={vip.number} 
+                              onSelect={() => {
+                                if (!isAlreadyInPack) {
+                                  handleAddVipToPack(vip);
+                                }
+                              }}
+                              disabled={isAlreadyInPack}
+                            >
+                              <CheckIcon
+                                className={cn(
+                                  "mr-2 h-4 w-4",
+                                  isAlreadyInPack ? "opacity-100" : "opacity-0"
+                                )}
+                              />
+                              {vip.number} (₹{vip.price.toLocaleString()})
+                            </CommandItem>
+                          );
+                        })}
                     </CommandGroup>
                   </CommandList>
                 </Command>
@@ -283,7 +307,7 @@ export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: Number
                         placeholder="e.g., 98XXXX0001" 
                         {...field} 
                         readOnly={!!item.originalVipNumberId} 
-                        className={!!item.originalVipNumberId ? "bg-muted/50" : ""}
+                        className={!!item.originalVipNumberId ? "bg-muted/50 cursor-not-allowed" : ""}
                       />
                     </FormControl>
                     <FormMessage />
@@ -310,7 +334,7 @@ export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: Number
               />
               <input type="hidden" {...form.register(`numbers.${index}.originalVipNumberId`)} />
               <Button
-                type="button" // Ensure it's not a submit button
+                type="button" 
                 variant="destructive"
                 size="icon"
                 onClick={() => remove(index)}
@@ -322,7 +346,7 @@ export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: Number
             </div>
           ))}
           <Button
-            type="button" // Ensure it's not a submit button
+            type="button" 
             variant="outline"
             size="sm"
             onClick={handleAddItemManually}
@@ -348,3 +372,4 @@ export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: Number
     </Form>
   );
 }
+
