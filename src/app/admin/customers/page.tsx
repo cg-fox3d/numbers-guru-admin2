@@ -31,7 +31,6 @@ export default function CustomersPage() {
   const { toast } = useToast();
 
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
-  // pageStartCursors[i] stores the first document of page i. pageStartCursors[0] is null.
   const [pageStartCursors, setPageStartCursors] = useState<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
   const [lastVisibleDoc, setLastVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [firstVisibleDoc, setFirstVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
@@ -58,8 +57,8 @@ export default function CustomersPage() {
 
       if (options.isRefresh || pageIdxToLoad === 0) {
         queryCursor = null;
-        if (options.isRefresh) { // Full reset for refresh
-             setPageStartCursors([null]);
+        if (options.isRefresh) { 
+             setPageStartCursors([null]); // Full reset for refresh
         }
       } else if (pageIdxToLoad > 0 && pageIdxToLoad < pageStartCursors.length) {
         queryCursor = pageStartCursors[pageIdxToLoad];
@@ -91,10 +90,8 @@ export default function CustomersPage() {
       setHasNextPage(newHasNextPage);
       
       if (options.isRefresh || pageIdxToLoad === 0) {
-        // Reset cursors, keeping null for page 0 and adding start of page 0 if docs exist
         setPageStartCursors(newFirstVisibleDoc ? [null, newFirstVisibleDoc] : [null]);
       } else if (pageIdxToLoad >= pageStartCursors.length && newFirstVisibleDoc && queryCursor === lastVisibleDoc) {
-        // This means we successfully navigated to a new "next" page
         setPageStartCursors(prev => [...prev, newFirstVisibleDoc]);
       }
 
@@ -111,19 +108,19 @@ export default function CustomersPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast, buildPageQuery]); // Removed pageStartCursors, lastVisibleDoc
+  }, [toast, buildPageQuery]);
 
   useEffect(() => {
     loadCustomers(currentPageIndex, {isRefresh: currentPageIndex === 0 && pageStartCursors.length <=1 });
-  }, [currentPageIndex, loadCustomers]); // loadCustomers is memoized
+  }, [currentPageIndex, loadCustomers]);
 
   useEffect(() => {
+    const lowercasedFilter = searchTerm.toLowerCase();
+    const currentCustomers = customersOnPage || [];
+
     if (searchTerm === '') {
-      setFilteredCustomers(customersOnPage);
+      setFilteredCustomers(currentCustomers);
     } else {
-      const lowercasedFilter = searchTerm.toLowerCase();
-      // Client-side search on the current page's data
-      const currentCustomers = customersOnPage || [];
       const filteredData = currentCustomers.filter(customer => {
         const nameMatch = customer.name?.toLowerCase().includes(lowercasedFilter);
         const emailMatch = customer.email?.toLowerCase().includes(lowercasedFilter);
@@ -303,3 +300,4 @@ export default function CustomersPage() {
     </>
   );
 }
+
