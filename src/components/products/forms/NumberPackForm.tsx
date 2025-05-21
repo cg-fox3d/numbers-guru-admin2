@@ -3,14 +3,20 @@
 
 import type { UseFormReturn} from 'react-hook-form';
 import { useFieldArray } from 'react-hook-form';
+import { useEffect, useState } from 'react';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import type { NumberPackFormData, NumberPackItemFormData } from '@/types';
-import { PlusCircle, Trash2 } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { PlusCircle, Trash2, ChevronsUpDown, CheckIcon } from 'lucide-react';
+import type { NumberPackFormData, NumberPackItemFormData, VipNumber } from '@/types';
+import { db } from '@/lib/firebase';
+import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { cn } from '@/lib/utils';
 
 interface NumberPackFormProps {
   form: UseFormReturn<NumberPackFormData>;
@@ -20,10 +26,51 @@ interface NumberPackFormProps {
 }
 
 export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: NumberPackFormProps) {
-  const { fields, append, remove } = useFieldArray({
+  const { fields, append, remove, update } = useFieldArray({
     control: form.control,
     name: "numbers",
   });
+
+  const [availableVips, setAvailableVips] = useState<VipNumber[]>([]);
+  const [isLoadingVips, setIsLoadingVips] = useState(false);
+  const [isVipComboboxOpen, setIsVipComboboxOpen] = useState(false);
+  const [vipSearchTerm, setVipSearchTerm] = useState(""); // Not directly used for CommandInput value, but can be for custom logic
+
+  useEffect(() => {
+    const fetchVips = async () => {
+      setIsLoadingVips(true);
+      try {
+        const q = query(collection(db, 'vipNumbers'), where('status', '==', 'available'), orderBy('number', 'asc'));
+        const querySnapshot = await getDocs(q);
+        const vips: VipNumber[] = [];
+        querySnapshot.forEach((doc) => {
+          vips.push({ id: doc.id, ...doc.data() } as VipNumber);
+        });
+        setAvailableVips(vips);
+      } catch (error) {
+        console.error("Error fetching available VIP numbers: ", error);
+        // Optionally, set an error state and display it to the user
+      } finally {
+        setIsLoadingVips(false);
+      }
+    };
+    fetchVips();
+  }, []);
+
+  const handleAddVipToPack = (vip: VipNumber) => {
+    append({
+      originalVipNumberId: vip.id,
+      number: vip.number,
+      price: vip.price, // Pre-fill price from VIP number, can be overridden
+    } as NumberPackItemFormData);
+    setIsVipComboboxOpen(false); // Close combobox after selection
+    setVipSearchTerm(""); // Reset search term
+  };
+  
+  const handleAddItemManually = () => {
+    append({ number: '', price: 0 } as NumberPackItemFormData);
+  };
+
 
   return (
     <Form {...form}>
@@ -174,7 +221,53 @@ export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: Number
           />
 
         <div className="space-y-3 border p-3 rounded-md">
-          <FormLabel>Numbers in Pack</FormLabel>
+          <div className="flex justify-between items-center">
+            <FormLabel>Numbers in Pack</FormLabel>
+            <Popover open={isVipComboboxOpen} onOpenChange={setIsVipComboboxOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={isVipComboboxOpen}
+                  className="w-[250px] justify-between"
+                  disabled={isLoadingVips}
+                >
+                  {isLoadingVips ? "Loading VIPs..." : "Add VIP Number from List"}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[300px] p-0">
+                <Command>
+                  <CommandInput 
+                    placeholder="Search VIP number..."
+                    value={vipSearchTerm}
+                    onValueChange={setVipSearchTerm} // Allows Command to filter internally
+                  />
+                  <CommandList>
+                    <CommandEmpty>No VIP number found.</CommandEmpty>
+                    <CommandGroup>
+                      {availableVips.map((vip) => (
+                        <CommandItem
+                          key={vip.id}
+                          value={vip.number} // Value used for searching
+                          onSelect={() => handleAddVipToPack(vip)}
+                        >
+                          <CheckIcon
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              fields.some(field => field.originalVipNumberId === vip.id) ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                          {vip.number} (₹{vip.price.toLocaleString()})
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
+
           {fields.map((item, index) => (
             <div key={item.id} className="flex items-end gap-2 p-2 border rounded-md">
               <FormField
@@ -184,7 +277,12 @@ export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: Number
                   <FormItem className="flex-1">
                     <FormLabel className="text-xs">Number {index + 1}</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g., 98XXXX0001" {...field} />
+                      <Input 
+                        placeholder="e.g., 98XXXX0001" 
+                        {...field} 
+                        readOnly={!!item.originalVipNumberId} // Make read-only if added from VIP list
+                        className={!!item.originalVipNumberId ? "bg-muted/50" : ""}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -195,7 +293,7 @@ export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: Number
                 name={`numbers.${index}.price`}
                 render={({ field }) => (
                   <FormItem className="w-32">
-                     <FormLabel className="text-xs">Price (₹)</FormLabel>
+                     <FormLabel className="text-xs">Price in Pack (₹)</FormLabel>
                     <FormControl>
                       <Input 
                         type="number" 
@@ -208,6 +306,8 @@ export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: Number
                   </FormItem>
                 )}
               />
+               {/* Hidden field to store originalVipNumberId if item came from VIP list */}
+              <input type="hidden" {...form.register(`numbers.${index}.originalVipNumberId`)} />
               <Button
                 type="button"
                 variant="destructive"
@@ -224,10 +324,10 @@ export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: Number
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => append({ number: '', price: 0 } as NumberPackItemFormData)}
+            onClick={handleAddItemManually}
             className="mt-2"
           >
-            <PlusCircle className="mr-2 h-4 w-4" /> Add Number to Pack
+            <PlusCircle className="mr-2 h-4 w-4" /> Add Item Manually
           </Button>
            <FormMessage>{form.formState.errors.numbers?.message || form.formState.errors.numbers?.root?.message}</FormMessage>
         </div>
@@ -247,4 +347,3 @@ export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: Number
     </Form>
   );
 }
-

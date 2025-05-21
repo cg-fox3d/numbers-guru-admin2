@@ -13,9 +13,6 @@ export const categorySchema = z.object({
     if (val && val.trim() !== '') {
       return slugify(val);
     }
-    // If slug is empty, it will be generated from title in the dialog logic
-    // This requires access to the title, so actual generation if empty should be in the component.
-    // For the schema, an empty string or undefined is acceptable here.
     return val;
   }),
   order: z.preprocess(
@@ -34,7 +31,7 @@ export const vipNumberSchema = z.object({
     (val) => {
       if (typeof val === 'string' && val.trim() !== '') return parseFloat(val.replace(/,/g, ''));
       if (typeof val === 'number') return val;
-      return undefined; // Ensure it can be undefined if empty, then zod catches with `required_error` or type error
+      return undefined; 
     },
     z.number({ required_error: "Price is required.", invalid_type_error: "Price must be a number." }).min(0, { message: 'Price must be a positive number.' })
   ),
@@ -42,7 +39,7 @@ export const vipNumberSchema = z.object({
     (val) => {
       if (typeof val === 'string' && val.trim() !== '') return parseFloat(val.replace(/,/g, ''));
       if (typeof val === 'number') return val;
-      return null; // Explicitly return null if empty or not a number, Zod will convert to undefined for optional
+      return null; 
     },
     z.number({ invalid_type_error: "Original price must be a number." }).min(0, { message: 'Original price must be positive.' }).optional().nullable()
   ),
@@ -50,7 +47,7 @@ export const vipNumberSchema = z.object({
     (val) => {
       if (typeof val === 'string' && val.trim() !== '') return parseFloat(val.replace(/%/g, ''));
       if (typeof val === 'number') return val;
-      return null; // Explicitly return null
+      return null; 
     },
     z.number({ invalid_type_error: "Discount must be a number." }).min(0).max(100, { message: 'Discount must be between 0 and 100.' }).optional().nullable()
   ),
@@ -66,7 +63,8 @@ export const vipNumberSchema = z.object({
 export type VipNumberFormData = z.infer<typeof vipNumberSchema>;
 
 export const numberPackItemSchema = z.object({
-  id: z.string().optional(), // For react-hook-form key, or can be actual VIP number doc ID
+  id: z.string().optional(), 
+  originalVipNumberId: z.string().optional(), // ID of the VIP number if selected
   number: z.string().min(1, { message: 'Number is required.' }).regex(/^\d+([-\s]?\d+)*$/, { message: 'Number must contain only digits and optional hyphens/spaces.' }),
   price: z.preprocess(
     (val) => {
@@ -108,8 +106,6 @@ export const numberPackSchema = z.object({
 
 export type NumberPackFormData = z.infer<typeof numberPackSchema>;
 
-
-// Placeholder for Product (general type, might be removed if specific types are always used)
 export const productSchema = z.object({
   name: z.string().min(3, { message: 'Product name must be at least 3 characters.' }),
   type: z.enum(['VIP Number', 'Number Pack'], { required_error: 'Product type is required.' }),
@@ -135,4 +131,3 @@ export const productSchema = z.object({
 });
 
 export type ProductFormValues = z.infer<typeof productSchema>;
-

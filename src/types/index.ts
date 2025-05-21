@@ -36,7 +36,8 @@ export type VipNumberFormData = z.infer<typeof vipNumberSchema>;
 
 
 export interface NumberPackItem {
-  id?: string; 
+  id?: string; // For react-hook-form key
+  originalVipNumberId?: string; // ID of the VIP number if selected from collection
   number: string;
   price: number; 
 }
