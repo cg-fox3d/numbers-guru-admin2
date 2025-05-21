@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -9,48 +9,53 @@ import { PlusCircle } from 'lucide-react';
 import { VipNumbersTab } from '@/components/products/VipNumbersTab';
 import { NumberPacksTab } from '@/components/products/NumberPacksTab';
 import { db } from '@/lib/firebase';
-import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, getDocs } from 'firebase/firestore';
 import type { Category } from '@/types';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useToast } from '@/hooks/use-toast';
 
 export default function ProductsPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryMap, setCategoryMap] = useState<Record<string, string>>({});
   const [isLoadingCategories, setIsLoadingCategories] = useState(true);
+  const { toast } = useToast();
+
+  const loadCategories = useCallback(async () => {
+    setIsLoadingCategories(true);
+    try {
+      const q = query(collection(db, 'categories'), orderBy('order', 'asc'));
+      const querySnapshot = await getDocs(q);
+      const fetchedCategories: Category[] = [];
+      const newCategoryMap: Record<string, string> = {};
+      querySnapshot.forEach((doc) => {
+        const category = { id: doc.id, ...doc.data() } as Category;
+        fetchedCategories.push(category);
+        newCategoryMap[category.slug] = category.title;
+      });
+      setCategories(fetchedCategories);
+      setCategoryMap(newCategoryMap);
+    } catch (error) {
+      console.error("Error fetching categories: ", error);
+      toast({
+        title: "Error Fetching Categories",
+        description: (error as Error).message || "Could not load categories for product tabs.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingCategories(false);
+    }
+  }, [toast]);
 
   useEffect(() => {
-    const q = query(collection(db, 'categories'), orderBy('order', 'asc'));
-    const unsubscribe = onSnapshot(q, 
-      (querySnapshot) => {
-        const fetchedCategories: Category[] = [];
-        const newCategoryMap: Record<string, string> = {};
-        querySnapshot.forEach((doc) => {
-          const category = { id: doc.id, ...doc.data() } as Category;
-          fetchedCategories.push(category);
-          newCategoryMap[category.slug] = category.title;
-        });
-        setCategories(fetchedCategories);
-        setCategoryMap(newCategoryMap);
-        setIsLoadingCategories(false);
-      },
-      (error) => {
-        console.error("Error fetching categories: ", error);
-        setIsLoadingCategories(false);
-      }
-    );
-    return () => unsubscribe();
-  }, []);
+    loadCategories();
+  }, [loadCategories]);
 
   return (
     <>
       <PageHeader
         title="Products Management"
         description="Manage your VIP numbers and number packs."
-        actions={
-          <Button disabled className="bg-primary hover:bg-primary/90">
-            <PlusCircle className="mr-2 h-4 w-4" /> Add New Product
-          </Button>
-        }
+        // "Add New Product" button is now tab-specific
       />
 
       {isLoadingCategories ? (
