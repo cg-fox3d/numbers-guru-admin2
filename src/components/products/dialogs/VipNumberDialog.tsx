@@ -9,7 +9,7 @@ import { VipNumberForm } from '@/components/products/forms/VipNumberForm';
 import type { VipNumber, VipNumberFormData } from '@/types';
 import { vipNumberSchema } from '@/lib/schemas';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, doc, updateDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, serverTimestamp, Timestamp, query, where, getDocs } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 
 interface VipNumberDialogProps {
@@ -28,8 +28,8 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
     defaultValues: {
       number: '',
       price: 0,
-      originalPrice: null, // Changed from undefined
-      discount: null,      // Changed from undefined
+      originalPrice: null, 
+      discount: null,      
       status: 'available',
       categorySlug: '',
       description: '',
@@ -46,8 +46,8 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
         form.reset({
           number: vipNumber.number,
           price: vipNumber.price,
-          originalPrice: vipNumber.originalPrice ?? null, // Changed
-          discount: vipNumber.discount ?? null,          // Changed
+          originalPrice: vipNumber.originalPrice ?? null, 
+          discount: vipNumber.discount ?? null,          
           status: vipNumber.status,
           categorySlug: vipNumber.categorySlug,
           description: vipNumber.description || '',
@@ -60,8 +60,8 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
         form.reset({
           number: '',
           price: 0,
-          originalPrice: null, // Changed
-          discount: null,      // Changed
+          originalPrice: null, 
+          discount: null,      
           status: 'available',
           categorySlug: '',
           description: '',
@@ -77,11 +77,73 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
 
   const handleFormSubmit = async (data: VipNumberFormData) => {
     setIsSubmitting(true);
+    const processedNumber = data.number.trim();
+
+    if (!processedNumber) {
+        toast({
+            title: 'Validation Error',
+            description: 'VIP Number cannot be empty.',
+            variant: 'destructive',
+        });
+        setIsSubmitting(false);
+        return;
+    }
     
-    // Prepare data for Firestore, ensuring numbers are numbers
-    // and optional fields that are empty/null in form become undefined for Firestore or null if preferred
-    const dataToSave: Partial<VipNumber> = { // Use Partial<VipNumber> to match Firestore structure potentially
-      number: data.number,
+    // Duplicate check
+    try {
+      const vipNumbersRef = collection(db, 'vipNumbers');
+      let q;
+
+      if (vipNumber && vipNumber.id) { // Editing existing number
+        // Only check for duplicates if the number string has actually changed
+        if (processedNumber !== vipNumber.number.trim()) {
+          q = query(vipNumbersRef, where('number', '==', processedNumber));
+          const querySnapshot = await getDocs(q);
+          if (!querySnapshot.empty) {
+            // Check if the found duplicate is not the current document itself
+            let isActualDuplicate = false;
+            querySnapshot.forEach(doc => {
+              if (doc.id !== vipNumber.id) {
+                isActualDuplicate = true;
+              }
+            });
+            if (isActualDuplicate) {
+              toast({
+                title: 'Duplicate VIP Number',
+                description: `The VIP Number "${processedNumber}" already exists. Please enter a unique number.`,
+                variant: 'destructive',
+              });
+              setIsSubmitting(false);
+              return;
+            }
+          }
+        }
+      } else { // Adding new number
+        q = query(vipNumbersRef, where('number', '==', processedNumber));
+        const querySnapshot = await getDocs(q);
+        if (!querySnapshot.empty) {
+          toast({
+            title: 'Duplicate VIP Number',
+            description: `The VIP Number "${processedNumber}" already exists. Please enter a unique number.`,
+            variant: 'destructive',
+          });
+          setIsSubmitting(false);
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('Error checking for duplicate VIP number:', error);
+      toast({
+        title: 'Error',
+        description: 'Could not verify VIP number uniqueness. Please try again.',
+        variant: 'destructive',
+      });
+      setIsSubmitting(false);
+      return;
+    }
+
+    const dataToSave: Partial<VipNumber> = {
+      number: processedNumber, // Use the processed number
       price: Number(data.price),
       originalPrice: data.originalPrice !== null && data.originalPrice !== undefined ? Number(data.originalPrice) : undefined,
       discount: data.discount !== null && data.discount !== undefined ? Number(data.discount) : undefined,
@@ -92,18 +154,15 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
       isVip: data.isVip || false,
       sumOfDigits: data.sumOfDigits || undefined,
       totalDigits: data.totalDigits || undefined,
-      // Casting serverTimestamp for updatedAt
       updatedAt: serverTimestamp() as Timestamp,
     };
     
-    // Remove undefined fields explicitly for cleaner Firestore data, though Firestore handles it
     Object.keys(dataToSave).forEach(keyStr => {
       const key = keyStr as keyof typeof dataToSave;
       if (dataToSave[key] === undefined) {
         delete dataToSave[key];
       }
     });
-
 
     if (!dataToSave.categorySlug || dataToSave.categorySlug.trim() === '') {
         toast({
@@ -115,23 +174,21 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
         return;
     }
 
-
     try {
       if (vipNumber && vipNumber.id) {
         const vipNumberRef = doc(db, 'vipNumbers', vipNumber.id);
         await updateDoc(vipNumberRef, dataToSave);
         toast({
           title: 'VIP Number Updated',
-          description: `VIP Number "${data.number}" has been successfully updated.`,
+          description: `VIP Number "${processedNumber}" has been successfully updated.`,
         });
       } else {
-        // Add createdAt only for new documents
         const dataForAdd = { ...dataToSave, createdAt: serverTimestamp() as Timestamp };
-        delete dataForAdd.updatedAt; // No updatedAt on create, Firestore rule/trigger could handle this too
+        delete (dataForAdd as any).updatedAt; 
         await addDoc(collection(db, 'vipNumbers'), dataForAdd);
         toast({
           title: 'VIP Number Added',
-          description: `VIP Number "${data.number}" has been successfully added.`,
+          description: `VIP Number "${processedNumber}" has been successfully added.`,
         });
       }
       onSuccess?.();
