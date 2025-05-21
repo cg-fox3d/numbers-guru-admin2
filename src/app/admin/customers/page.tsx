@@ -5,7 +5,8 @@ import { useEffect, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Users, MoreHorizontal } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Users, MoreHorizontal, Search as SearchIcon } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { db } from '@/lib/firebase';
 import { collection, query, orderBy, onSnapshot, Timestamp } from 'firebase/firestore';
@@ -21,26 +22,24 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 export default function CustomersPage() {
-  const [customers, setCustomers] = useState<AdminDisplayCustomer[]>([]);
+  const [allCustomers, setAllCustomers] = useState<AdminDisplayCustomer[]>([]);
+  const [filteredCustomers, setFilteredCustomers] = useState<AdminDisplayCustomer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
   const { toast } = useToast();
 
   const fetchCustomers = useCallback(() => {
     setIsLoading(true);
-    // This query assumes you have a 'users' collection.
-    // It also assumes documents in 'users' have a 'createdAt' field of Timestamp type for sorting.
-    // A Firestore index on 'users' for 'createdAt' (descending) might be required.
-    // Check browser console for Firestore index errors if data doesn't load.
     const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
     
     const unsubscribe = onSnapshot(q, 
       (querySnapshot) => {
         const fetchedCustomers: AdminDisplayCustomer[] = [];
         querySnapshot.forEach((doc) => {
-          // Assuming document ID is the user's UID
           fetchedCustomers.push({ id: doc.id, ...doc.data() } as AdminDisplayCustomer);
         });
-        setCustomers(fetchedCustomers);
+        setAllCustomers(fetchedCustomers);
+        setFilteredCustomers(fetchedCustomers); // Initialize filtered list
         setIsLoading(false);
       },
       (error) => {
@@ -61,25 +60,49 @@ export default function CustomersPage() {
     return () => unsubscribe();
   }, [fetchCustomers]);
 
+  useEffect(() => {
+    const lowercasedFilter = searchTerm.toLowerCase();
+    const filteredData = allCustomers.filter(customer => {
+      const nameMatch = customer.name?.toLowerCase().includes(lowercasedFilter);
+      const emailMatch = customer.email.toLowerCase().includes(lowercasedFilter);
+      return nameMatch || emailMatch;
+    });
+    setFilteredCustomers(filteredData);
+  }, [searchTerm, allCustomers]);
+
   return (
     <>
       <PageHeader
         title="Customers Management"
-        description="View customer information from the 'users' collection."
+        description="View and search customer information from the 'users' collection."
       />
       <Card className="shadow-lg">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Users className="h-6 w-6 text-primary" />
-            <span>Customer List</span>
-          </CardTitle>
-          <CardDescription>
-            Displaying users from the Firestore 'users' collection. Ensure this collection exists and has a 'createdAt' (Timestamp) field.
-            An index on 'users' for 'createdAt' (descending) may be required by Firestore.
-          </CardDescription>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex-1">
+              <CardTitle className="flex items-center gap-2">
+                <Users className="h-6 w-6 text-primary" />
+                <span>Customer List</span>
+              </CardTitle>
+              <CardDescription>
+                Displaying users from the Firestore 'users' collection. Ensure this collection exists and has a 'createdAt' (Timestamp) field.
+                An index on 'users' for 'createdAt' (descending) may be required by Firestore.
+              </CardDescription>
+            </div>
+          </div>
+          <div className="mt-4 relative">
+            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+            <Input
+              type="search"
+              placeholder="Search by email or name..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 w-full md:w-1/2 lg:w-1/3"
+            />
+          </div>
         </CardHeader>
         <CardContent className="p-0">
-          {isLoading ? (
+          {isLoading && allCustomers.length === 0 ? ( // Initial loading skeleton
             <Table>
               <TableHeader>
                 <TableRow>
@@ -102,7 +125,7 @@ export default function CustomersPage() {
                 ))}
               </TableBody>
             </Table>
-          ) : customers.length === 0 ? (
+          ) : !isLoading && allCustomers.length === 0 ? ( // No customers at all
             <div className="flex flex-col items-center justify-center text-center p-10">
               <Users className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-xl font-semibold">No Customers Found</h3>
@@ -111,7 +134,13 @@ export default function CustomersPage() {
                 Ensure your Firestore 'users' collection has documents with a 'createdAt' field.
               </p>
             </div>
-          ) : (
+          ) : !isLoading && filteredCustomers.length === 0 && searchTerm ? ( // No search results
+            <div className="flex flex-col items-center justify-center text-center p-10">
+              <SearchIcon className="h-12 w-12 text-muted-foreground mb-4" />
+              <h3 className="text-xl font-semibold">No Customers Match Your Search</h3>
+              <p className="text-muted-foreground">Try a different search term.</p>
+            </div>
+          ) : ( // Display filtered customers
             <Table>
               <TableHeader>
                 <TableRow>
@@ -123,7 +152,7 @@ export default function CustomersPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {customers.map((customer) => (
+                {filteredCustomers.map((customer) => (
                   <TableRow key={customer.id}>
                     <TableCell className="font-mono text-xs">{customer.id}</TableCell>
                     <TableCell>{customer.email}</TableCell>
@@ -162,3 +191,4 @@ export default function CustomersPage() {
     </>
   );
 }
+
