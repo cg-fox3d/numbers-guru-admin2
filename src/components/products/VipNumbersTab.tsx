@@ -3,12 +3,13 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, query, orderBy, onSnapshot, Timestamp, doc, deleteDoc } from 'firebase/firestore'; // where, getDocs removed as categories are not fetched here anymore
-import type { VipNumber } from '@/types'; // Category type import removed
+import { collection, query, orderBy, onSnapshot, Timestamp, doc, deleteDoc } from 'firebase/firestore';
+import type { VipNumber } from '@/types';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { MoreHorizontal, Edit, Trash2, PackageSearch, PlusCircle } from 'lucide-react';
+import { MoreHorizontal, Edit, Trash2, PackageSearch, PlusCircle, Search as SearchIcon } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { format } from 'date-fns';
@@ -31,17 +32,16 @@ interface VipNumbersTabProps {
 }
 
 export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
-  const [vipNumbers, setVipNumbers] = useState<VipNumber[]>([]);
+  const [allVipNumbers, setAllVipNumbers] = useState<VipNumber[]>([]);
+  const [filteredVipNumbers, setFilteredVipNumbers] = useState<VipNumber[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingVipNumber, setEditingVipNumber] = useState<VipNumber | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [vipNumberToDelete, setVipNumberToDelete] = useState<VipNumber | null>(null);
-  // individualCategories and isLoadingCategories state removed
+  const [searchTerm, setSearchTerm] = useState('');
 
   const { toast } = useToast();
-
-  // fetchIndividualCategories function and its useEffect call removed
 
   const fetchVipNumbers = useCallback(() => {
     setIsLoading(true);
@@ -52,7 +52,8 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
         querySnapshot.forEach((doc) => {
           numbers.push({ id: doc.id, ...doc.data() } as VipNumber);
         });
-        setVipNumbers(numbers);
+        setAllVipNumbers(numbers);
+        setFilteredVipNumbers(numbers); // Initialize filtered list
         setIsLoading(false);
       },
       (error) => {
@@ -73,14 +74,20 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
     return () => unsubscribe();
   }, [fetchVipNumbers]);
 
+  useEffect(() => {
+    const lowercasedFilter = searchTerm.toLowerCase();
+    const filteredData = allVipNumbers.filter(item => {
+      return item.number.toLowerCase().includes(lowercasedFilter);
+    });
+    setFilteredVipNumbers(filteredData);
+  }, [searchTerm, allVipNumbers]);
+
   const handleAddNewVipNumber = () => {
-    // Checks for isLoadingCategories and individualCategories.length removed
     setEditingVipNumber(null);
     setIsDialogOpen(true);
   };
 
   const handleEditVipNumber = (product: VipNumber) => {
-    // Checks for isLoadingCategories and individualCategories.length removed
     setEditingVipNumber(product);
     setIsDialogOpen(true);
   };
@@ -115,7 +122,7 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
     }
   };
 
-  if (isLoading && vipNumbers.length === 0) {
+  if (isLoading && allVipNumbers.length === 0) { // Check allVipNumbers for initial load
     return (
       <Card>
         <CardHeader>
@@ -155,14 +162,23 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
           <Button 
             onClick={handleAddNewVipNumber} 
             className="bg-primary hover:bg-primary/90"
-            // disabled={isLoadingCategories} prop removed
           >
             <PlusCircle className="mr-2 h-4 w-4" /> Add New VIP Number
           </Button>
         </div>
+        <div className="mt-4 relative">
+          <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+          <Input
+            type="search"
+            placeholder="Search by number..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10 w-full md:w-1/2 lg:w-1/3"
+          />
+        </div>
       </CardHeader>
       <CardContent className="p-0">
-        {isLoading && vipNumbers.length > 0 && (
+        {isLoading && filteredVipNumbers.length === 0 && searchTerm === '' && ( // Show skeleton only on initial load and empty results
           <Table>
             <TableHeader>
               <TableRow>
@@ -189,15 +205,19 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
           </Table>
         )}
 
-        {!isLoading && vipNumbers.length === 0 && (
+        {!isLoading && filteredVipNumbers.length === 0 ? (
           <div className="flex flex-col items-center justify-center text-center p-10">
             <PackageSearch className="h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-xl font-semibold">No VIP Numbers Found</h3>
-            <p className="text-muted-foreground">Add your first VIP number to see it listed here.</p>
+            <h3 className="text-xl font-semibold">
+              {searchTerm ? 'No VIP Numbers Match Your Search' : 'No VIP Numbers Found'}
+            </h3>
+            <p className="text-muted-foreground">
+              {searchTerm ? 'Try a different search term.' : 'Add your first VIP number to see it listed here.'}
+            </p>
           </div>
-        )}
+        ) : null}
 
-        {!isLoading && vipNumbers.length > 0 && (
+        {!isLoading && filteredVipNumbers.length > 0 && (
           <Table>
             <TableHeader>
               <TableRow>
@@ -212,7 +232,7 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {vipNumbers.map((product) => (
+              {filteredVipNumbers.map((product) => (
                 <TableRow key={product.id}>
                   <TableCell className="font-medium">{product.number}</TableCell>
                   <TableCell>{categoryMap[product.categorySlug] || product.categorySlug}</TableCell>
@@ -243,7 +263,7 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleEditVipNumber(product)} /* disabled prop removed */>
+                        <DropdownMenuItem onClick={() => handleEditVipNumber(product)}>
                           <Edit className="mr-2 h-4 w-4" /> Edit
                         </DropdownMenuItem>
                         <DropdownMenuItem
@@ -262,7 +282,7 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
         )}
       </CardContent>
 
-      {isDialogOpen && ( //isLoadingCategories check removed
+      {isDialogOpen && (
         <VipNumberDialog
           isOpen={isDialogOpen}
           onClose={() => {
@@ -270,7 +290,6 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
             setEditingVipNumber(null);
           }}
           vipNumber={editingVipNumber}
-          // categories prop removed
           onSuccess={() => { /* Data re-fetches via onSnapshot automatically */ }}
         />
       )}
@@ -299,5 +318,3 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
     </Card>
   );
 }
-
-    

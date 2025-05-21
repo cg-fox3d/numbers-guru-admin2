@@ -7,13 +7,14 @@ import { collection, query, orderBy, onSnapshot, Timestamp, doc, deleteDoc } fro
 import type { NumberPack } from '@/types';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { MoreHorizontal, Edit, Trash2, PackageSearch, PlusCircle } from 'lucide-react';
+import { MoreHorizontal, Edit, Trash2, PackageSearch, PlusCircle, Search as SearchIcon } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
-import { NumberPackDialog } from '@/components/products/dialogs/NumberPackDialog'; // Import the new dialog
+import { NumberPackDialog } from '@/components/products/dialogs/NumberPackDialog';
 import { useToast } from '@/hooks/use-toast';
 import {
   AlertDialog,
@@ -31,12 +32,14 @@ interface NumberPacksTabProps {
 }
 
 export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
-  const [numberPacks, setNumberPacks] = useState<NumberPack[]>([]);
+  const [allNumberPacks, setAllNumberPacks] = useState<NumberPack[]>([]);
+  const [filteredNumberPacks, setFilteredNumberPacks] = useState<NumberPack[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingNumberPack, setEditingNumberPack] = useState<NumberPack | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [packToDelete, setPackToDelete] = useState<NumberPack | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const { toast } = useToast();
 
@@ -49,7 +52,8 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
         querySnapshot.forEach((doc) => {
           packs.push({ id: doc.id, ...doc.data() } as NumberPack);
         });
-        setNumberPacks(packs);
+        setAllNumberPacks(packs);
+        setFilteredNumberPacks(packs); // Initialize filtered list
         setIsLoading(false);
       },
       (error) => {
@@ -69,6 +73,14 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
     const unsubscribe = fetchNumberPacks();
     return () => unsubscribe();
   }, [fetchNumberPacks]);
+
+  useEffect(() => {
+    const lowercasedFilter = searchTerm.toLowerCase();
+    const filteredData = allNumberPacks.filter(item => {
+      return item.name.toLowerCase().includes(lowercasedFilter);
+    });
+    setFilteredNumberPacks(filteredData);
+  }, [searchTerm, allNumberPacks]);
 
   const handleAddNewPack = () => {
     setEditingNumberPack(null);
@@ -110,7 +122,7 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
     }
   };
   
-  if (isLoading && numberPacks.length === 0) {
+  if (isLoading && allNumberPacks.length === 0) { // Check allNumberPacks for initial load
     return (
       <Card>
         <CardHeader>
@@ -151,9 +163,19 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
                 <PlusCircle className="mr-2 h-4 w-4" /> Add New Pack
             </Button>
         </div>
+        <div className="mt-4 relative">
+          <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+          <Input
+            type="search"
+            placeholder="Search by pack name..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10 w-full md:w-1/2 lg:w-1/3"
+          />
+        </div>
       </CardHeader>
       <CardContent className="p-0">
-        {isLoading && numberPacks.length > 0 && (
+        {isLoading && filteredNumberPacks.length === 0 && searchTerm === '' && (
              <Table>
                 <TableHeader>
                   <TableRow>
@@ -181,14 +203,19 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
                 </TableBody>
              </Table>
         )}
-        {!isLoading && numberPacks.length === 0 ? (
+        {!isLoading && filteredNumberPacks.length === 0 ? (
           <div className="flex flex-col items-center justify-center text-center p-10">
             <PackageSearch className="h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-xl font-semibold">No Number Packs Found</h3>
-            <p className="text-muted-foreground">Create your first number pack to see it listed here.</p>
+            <h3 className="text-xl font-semibold">
+              {searchTerm ? 'No Number Packs Match Your Search' : 'No Number Packs Found'}
+            </h3>
+            <p className="text-muted-foreground">
+              {searchTerm ? 'Try a different search term.' : 'Create your first number pack to see it listed here.'}
+            </p>
           </div>
-        ) : (
-          !isLoading && numberPacks.length > 0 && (
+        ) : null}
+        
+        {!isLoading && filteredNumberPacks.length > 0 && (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -203,7 +230,7 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {numberPacks.map((pack) => (
+                {filteredNumberPacks.map((pack) => (
                   <TableRow key={pack.id}>
                     <TableCell className="font-medium">{pack.name}</TableCell>
                     <TableCell>{pack.numbers?.length || 0}</TableCell>
@@ -246,7 +273,7 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
               </TableBody>
             </Table>
           )
-        )}
+        }
       </CardContent>
 
       {isDialogOpen && (
@@ -285,4 +312,3 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
     </Card>
   );
 }
-
