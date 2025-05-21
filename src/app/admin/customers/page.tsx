@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -31,10 +31,14 @@ export default function CustomersPage() {
   const { toast } = useToast();
 
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
-  // pageCursors[i] stores the first document snapshot of page i. pageCursors[0] is always null.
   const [pageCursors, setPageCursors] = useState<(QueryDocumentSnapshot<AdminDisplayCustomer> | null)[]>([null]);
+  const pageCursorsRef = useRef(pageCursors); // Ref to hold current pageCursors
   const [hasNextPage, setHasNextPage] = useState(false);
   const [lastFetchedDoc, setLastFetchedDoc] = useState<QueryDocumentSnapshot<AdminDisplayCustomer> | null>(null);
+
+  useEffect(() => {
+    pageCursorsRef.current = pageCursors;
+  }, [pageCursors]);
 
   const buildPageQuery = useCallback((cursor?: QueryDocumentSnapshot<AdminDisplayCustomer> | null) => {
     let q = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
@@ -46,18 +50,25 @@ export default function CustomersPage() {
 
   const loadCustomers = useCallback(async (pageIdxToLoad: number, options?: { isRefresh?: boolean }) => {
     setIsLoading(true);
-    const isActualRefresh = options?.isRefresh || (pageIdxToLoad === 0 && pageCursors.length <= 1 && pageCursors[0] === null);
+    const isActualRefresh = options?.isRefresh || (pageIdxToLoad === 0 && pageCursorsRef.current.length <= 1 && pageCursorsRef.current[0] === null);
+    
     let queryCursor: QueryDocumentSnapshot<AdminDisplayCustomer> | null = null;
     let effectivePageIdx = pageIdxToLoad;
 
     if (isActualRefresh) {
       effectivePageIdx = 0;
-      setSearchTerm(''); // Reset search term on refresh
-      setPageCursors([null]); // Reset cursors
+      setSearchTerm(''); 
+      setPageCursors([null]); 
       setLastFetchedDoc(null);
-      if (currentPageIndex !== 0) setCurrentPageIndex(0); // This will trigger effect to load page 0
+      if (currentPageIndex !== 0 && pageIdxToLoad === 0) {
+        // setCurrentPageIndex(0) is handled by handleRefresh if needed
+      } else if (currentPageIndex !== 0) {
+        setCurrentPageIndex(0);
+        setIsLoading(false); 
+        return;
+      }
     } else {
-      queryCursor = pageCursors[effectivePageIdx] || null;
+      queryCursor = pageCursorsRef.current[effectivePageIdx] || null;
     }
     
     try {
@@ -81,7 +92,7 @@ export default function CustomersPage() {
 
     } catch (error) {
       console.error("Error fetching customers: ", error);
-      setCustomersOnPage([]); // Set to empty array on error
+      setCustomersOnPage([]); 
       toast({
         title: 'Error Fetching Customers',
         description: (error as Error).message || 'Could not load customer data. An index on \'users\' for \'createdAt\' (desc) might be required.',
@@ -91,17 +102,16 @@ export default function CustomersPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast, buildPageQuery, currentPageIndex]); // Removed pageCursors from deps
+  }, [toast, buildPageQuery, currentPageIndex, setIsLoading, setCustomersOnPage, setHasNextPage, setLastFetchedDoc, setSearchTerm, setPageCursors]);
 
   useEffect(() => {
-    // This effect runs when currentPageIndex changes OR if loadCustomers reference changes (which it shouldn't much now)
-    const isRefreshIntent = currentPageIndex === 0 && (pageCursors.length <=1 && pageCursors[0] === null) && !searchTerm;
-    loadCustomers(currentPageIndex, { isRefresh: isRefreshIntent });
-  }, [currentPageIndex, loadCustomers]);
+    const isRefreshForEffect = currentPageIndex === 0 && (pageCursorsRef.current.length <=1 && pageCursorsRef.current[0] === null) && !searchTerm;
+    loadCustomers(currentPageIndex, { isRefresh: isRefreshForEffect });
+  }, [currentPageIndex, loadCustomers, searchTerm]);
+
 
   useEffect(() => {
     const lowercasedFilter = searchTerm.toLowerCase();
-    // Ensure customersOnPage is treated as an array, even if it's unexpectedly undefined
     const currentCustomers = customersOnPage || [];
 
     if (searchTerm === '') {
@@ -109,7 +119,6 @@ export default function CustomersPage() {
     } else {
       const filteredData = currentCustomers.filter(customer => {
         const nameMatch = customer.name?.toLowerCase().includes(lowercasedFilter);
-        // Ensure email is also safely accessed if it could ever be missing from a customer object
         const emailMatch = customer.email?.toLowerCase().includes(lowercasedFilter);
         return nameMatch || emailMatch;
       });
@@ -121,7 +130,7 @@ export default function CustomersPage() {
     if (currentPageIndex === 0) {
       loadCustomers(0, { isRefresh: true });
     } else {
-      setCurrentPageIndex(0); // This will trigger the useEffect which calls loadCustomers with refresh intent
+      setCurrentPageIndex(0); 
     }
   }, [currentPageIndex, loadCustomers]);
 
@@ -129,7 +138,7 @@ export default function CustomersPage() {
     if (hasNextPage && lastFetchedDoc) {
       setPageCursors(prev => {
         const newCursors = [...prev];
-        newCursors[currentPageIndex + 1] = lastFetchedDoc; // Store cursor for the page we are navigating to
+        newCursors[currentPageIndex + 1] = lastFetchedDoc; 
         return newCursors;
       });
       setCurrentPageIndex(prev => prev + 1);
@@ -291,4 +300,3 @@ export default function CustomersPage() {
     </>
   );
 }
-

@@ -1,9 +1,9 @@
 
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, query, orderBy, Timestamp, doc, deleteDoc, getDocs, limit, startAfter, QueryDocumentSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, Timestamp, doc, deleteDoc, getDocs, limit, startAfter, QueryDocumentSnapshot, endBefore, limitToLast } from 'firebase/firestore';
 import type { NumberPack } from '@/types';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -46,8 +46,13 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
 
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [pageCursors, setPageCursors] = useState<(QueryDocumentSnapshot<NumberPack> | null)[]>([null]);
+  const pageCursorsRef = useRef(pageCursors); // Ref to hold current pageCursors
   const [hasNextPage, setHasNextPage] = useState(false);
   const [lastFetchedDoc, setLastFetchedDoc] = useState<QueryDocumentSnapshot<NumberPack> | null>(null);
+
+  useEffect(() => {
+    pageCursorsRef.current = pageCursors;
+  }, [pageCursors]);
 
   const buildPageQuery = useCallback((cursor?: QueryDocumentSnapshot<NumberPack> | null) => {
     let q = query(collection(db, 'numberPacks'), orderBy('createdAt', 'desc'));
@@ -59,18 +64,25 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
 
   const loadNumberPacks = useCallback(async (pageIdxToLoad: number, options?: { isRefresh?: boolean }) => {
     setIsLoading(true);
-    const isActualRefresh = options?.isRefresh || (pageIdxToLoad === 0 && pageCursors.length <= 1 && pageCursors[0] === null);
+    const isActualRefresh = options?.isRefresh || (pageIdxToLoad === 0 && pageCursorsRef.current.length <= 1 && pageCursorsRef.current[0] === null);
+    
     let queryCursor: QueryDocumentSnapshot<NumberPack> | null = null;
     let effectivePageIdx = pageIdxToLoad;
 
     if (isActualRefresh) {
       effectivePageIdx = 0;
       setSearchTerm('');
-      setPageCursors([null]);
+      setPageCursors([null]); // This will trigger the ref update
       setLastFetchedDoc(null);
-      if (currentPageIndex !== 0) setCurrentPageIndex(0);
+      if (currentPageIndex !== 0 && pageIdxToLoad === 0) { // Avoid immediate re-render if already on page 0
+         // setCurrentPageIndex(0) is handled by handleRefresh if needed
+      } else if (currentPageIndex !== 0) {
+        setCurrentPageIndex(0); // This will trigger the useEffect for loading
+        setIsLoading(false); // Prevent loading state flicker if already handled
+        return;
+      }
     } else {
-      queryCursor = pageCursors[effectivePageIdx] || null;
+      queryCursor = pageCursorsRef.current[effectivePageIdx] || null;
     }
 
     try {
@@ -81,30 +93,36 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
         packs.push({ id: docSn.id, ...docSn.data() } as NumberPack);
       });
       setNumberPacksOnPage(packs);
+      
       const newHasNextPage = documentSnapshots.docs.length > PAGE_SIZE;
       setHasNextPage(newHasNextPage);
+
       if (newHasNextPage) {
-        setLastFetchedDoc(documentSnapshots.docs[PAGE_SIZE - 1] as QueryDocumentSnapshot<NumberPack>);
+        const lastDocOnThisPage = documentSnapshots.docs[PAGE_SIZE - 1] as QueryDocumentSnapshot<NumberPack>;
+        setLastFetchedDoc(lastDocOnThisPage);
       } else {
         setLastFetchedDoc(null);
       }
     } catch (error) {
       console.error("Error fetching number packs: ", error);
+      setNumberPacksOnPage([]);
       toast({
         title: 'Error Fetching Number Packs',
-        description: (error as Error).message || 'Could not load number packs.',
+        description: (error as Error).message || 'Could not load number packs. An index on \'createdAt\' (desc) might be required.',
         variant: 'destructive',
       });
        setHasNextPage(false);
     } finally {
       setIsLoading(false);
     }
-  }, [toast, buildPageQuery, currentPageIndex, pageCursors]);
+  }, [toast, buildPageQuery, currentPageIndex, setIsLoading, setNumberPacksOnPage, setHasNextPage, setLastFetchedDoc, setSearchTerm, setPageCursors]);
+
 
   useEffect(() => {
-    const isRefreshIntent = currentPageIndex === 0 && (pageCursors.length <=1 && pageCursors[0] === null);
-    loadNumberPacks(currentPageIndex, { isRefresh: isRefreshIntent });
-  }, [currentPageIndex, loadNumberPacks]);
+    const isRefreshForEffect = currentPageIndex === 0 && (pageCursorsRef.current.length <=1 && pageCursorsRef.current[0] === null) && !searchTerm;
+    loadNumberPacks(currentPageIndex, { isRefresh: isRefreshForEffect });
+  }, [currentPageIndex, loadNumberPacks, searchTerm]);
+
 
   useEffect(() => {
     const lowercasedFilter = searchTerm.toLowerCase();
@@ -122,7 +140,7 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
     if (currentPageIndex === 0) {
       loadNumberPacks(0, { isRefresh: true });
     } else {
-      setCurrentPageIndex(0);
+      setCurrentPageIndex(0); // This will trigger the useEffect which calls loadNumberPacks with refresh intent
     }
   }, [currentPageIndex, loadNumberPacks]);
 
@@ -130,7 +148,7 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
     if (hasNextPage && lastFetchedDoc) {
       setPageCursors(prev => {
         const newCursors = [...prev];
-        newCursors[currentPageIndex + 1] = lastFetchedDoc;
+        newCursors[currentPageIndex + 1] = lastFetchedDoc; 
         return newCursors;
       });
       setCurrentPageIndex(prev => prev + 1);
@@ -170,7 +188,15 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
         title: 'Number Pack Deleted',
         description: `Pack "${packToDelete.name}" has been successfully deleted.`,
       });
-      loadNumberPacks(currentPageIndex, {isRefresh: currentPageIndex === 0 && numberPacksOnPage.length === 1});
+      const isCurrentPageBecomingEmpty = filteredNumberPacks.length === 1 && numberPacksOnPage.length === 1;
+      if (currentPageIndex === 0 || isCurrentPageBecomingEmpty) {
+        loadNumberPacks(0, {isRefresh: true});
+      } else if (isCurrentPageBecomingEmpty && currentPageIndex > 0) {
+        setCurrentPageIndex(prev => prev -1); // Go to previous page
+      }
+      else {
+        loadNumberPacks(currentPageIndex, {isRefresh: false}); // Refresh current page
+      }
     } catch (error) {
       console.error("Error deleting number pack: ", error);
       toast({
@@ -185,7 +211,8 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
   };
 
   const onDialogSuccess = useCallback(() => {
-    loadNumberPacks(currentPageIndex, { isRefresh: currentPageIndex === 0 });
+    const isRefresh = currentPageIndex === 0;
+    loadNumberPacks(currentPageIndex, { isRefresh });
   }, [currentPageIndex, loadNumberPacks]);
   
   return (
@@ -194,7 +221,7 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
                 <CardTitle>Number Packs List</CardTitle>
-                <CardDescription>Browse and manage number pack bundles. An index on 'createdAt' (desc) might be required.</CardDescription>
+                <CardDescription>Browse and manage number pack bundles. An index on 'numberPacks' for 'createdAt' (desc) might be required.</CardDescription>
             </div>
             <div className="flex items-center gap-2">
               <Button onClick={handleRefresh} variant="outline" size="icon" aria-label="Refresh Number Packs" disabled={isLoading}>
@@ -254,6 +281,11 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
             <p className="text-muted-foreground">
               {searchTerm ? 'Try a different search term.' : 'Create your first number pack to see it listed here.'}
             </p>
+            {!searchTerm && numberPacksOnPage.length === 0 && ( 
+                <Button onClick={handleAddNewPack} className="mt-4 bg-primary hover:bg-primary/90">
+                  <PlusCircle className="mr-2 h-4 w-4" /> Add First Number Pack
+                </Button>
+              )}
           </div>
         ) : null}
         
@@ -266,7 +298,7 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
                   <TableHead>Pack Price (₹)</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Category</TableHead>
-                  <TableHead className="hidden lg:table-cell">Description</TableHead>
+                  <TableHead className="hidden lg:table-cell max-w-xs truncate">Description</TableHead>
                   <TableHead className="hidden lg:table-cell">Created At</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -290,7 +322,9 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
                     <TableCell className="hidden lg:table-cell">
                       {pack.createdAt instanceof Timestamp 
                         ? format(pack.createdAt.toDate(), 'PPp') 
-                        : 'N/A'}
+                        : typeof pack.createdAt === 'string' 
+                          ? pack.createdAt 
+                          : 'N/A'}
                     </TableCell>
                     <TableCell className="text-right">
                       <DropdownMenu>
