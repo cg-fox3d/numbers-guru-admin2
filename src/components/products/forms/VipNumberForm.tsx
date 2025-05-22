@@ -2,38 +2,72 @@
 'use client';
 
 import type { UseFormReturn } from 'react-hook-form';
+import { useEffect } from 'react';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import type { VipNumberFormData } from '@/types';
+import type { VipNumberFormData, Category } from '@/types';
 
 interface VipNumberFormProps {
   form: UseFormReturn<VipNumberFormData>;
   onSubmit: (data: VipNumberFormData) => Promise<void>;
   isSubmitting: boolean;
   onClose?: () => void;
+  categories: Category[];
 }
 
-export function VipNumberForm({ form, onSubmit, isSubmitting, onClose }: VipNumberFormProps) {
+// Helper function to calculate sum of digits and reduce to single digit (numerology)
+const calculateNumerologySum = (numberStr: string): string => {
+  if (!numberStr) return '';
+  const digits = numberStr.replace(/\D/g, ''); // Remove non-digits
+  if (!digits) return '';
+
+  let sum = digits.split('').reduce((acc, digit) => acc + parseInt(digit, 10), 0);
+
+  while (sum > 9) {
+    sum = sum.toString().split('').reduce((acc, digit) => acc + parseInt(digit, 10), 0);
+  }
+  return sum.toString();
+};
+
+const calculateTotalDigits = (numberStr: string): string => {
+    if (!numberStr) return '';
+    const digitsOnly = numberStr.replace(/\D/g, '');
+    return digitsOnly.length.toString();
+};
+
+
+export function VipNumberForm({ form, onSubmit, isSubmitting, onClose, categories }: VipNumberFormProps) {
   const { watch, setValue, getValues } = form;
+  const numberInput = watch('number');
+
+  useEffect(() => {
+    if (numberInput !== undefined) {
+      const total = calculateTotalDigits(numberInput);
+      const sum = calculateNumerologySum(numberInput);
+      setValue('totalDigits', total, { shouldValidate: false });
+      setValue('sumOfDigits', sum, { shouldValidate: false });
+    }
+  }, [numberInput, setValue]);
 
   const handleCalculatePrice = () => {
-    const originalPriceStr = String(getValues('originalPrice') || '');
-    const discountStr = String(getValues('discount') || '');
+    const originalPriceStr = String(getValues('originalPrice') || '0');
+    const discountStr = String(getValues('discount') || '0');
 
     const op = parseFloat(originalPriceStr);
     const d = parseFloat(discountStr);
 
-    if (!isNaN(op) && !isNaN(d) && d >= 0 && d <= 100) {
-      const calculatedPrice = op - (op * d / 100);
-      setValue('price', parseFloat(calculatedPrice.toFixed(2)), { shouldValidate: true });
-    } else if (!isNaN(op)) {
-      setValue('price', op, { shouldValidate: true });
+    if (!isNaN(op)) {
+      if (!isNaN(d) && d >= 0 && d <= 100) {
+        const calculatedPrice = op - (op * d / 100);
+        setValue('price', Math.round(calculatedPrice), { shouldValidate: true });
+      } else {
+        setValue('price', Math.round(op), { shouldValidate: true });
+      }
     } else {
-       // If original price is not a valid number, clear selling price or set to 0
        setValue('price', 0, { shouldValidate: true });
     }
   };
@@ -63,13 +97,13 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose }: VipNumb
               <FormItem>
                 <FormLabel>Original Price (₹)</FormLabel>
                 <FormControl>
-                  <Input 
-                    type="number" 
-                    placeholder="e.g., 60000" 
+                  <Input
+                    type="number"
+                    placeholder="e.g., 60000"
                     {...field}
-                    onChange={e => field.onChange(e.target.value)} // Pass string value
+                    onChange={e => field.onChange(e.target.value === '' ? null : parseFloat(e.target.value))}
                     onBlur={handleCalculatePrice}
-                    value={field.value === null ? '' : field.value} // Ensure value is not null for input
+                    value={field.value ?? ''}
                   />
                 </FormControl>
                 <FormMessage />
@@ -83,15 +117,16 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose }: VipNumb
               <FormItem>
                 <FormLabel>Discount (%)</FormLabel>
                 <FormControl>
-                  <Input 
-                    type="number" 
-                    placeholder="e.g., 10" 
+                  <Input
+                    type="number"
+                    placeholder="e.g., 10"
+                    step="0.01"
                     {...field}
-                    onChange={e => field.onChange(e.target.value)} // Pass string value
+                    onChange={e => field.onChange(e.target.value === '' ? null : parseFloat(e.target.value))}
                     onBlur={handleCalculatePrice}
                     min="0"
                     max="100"
-                    value={field.value === null ? '' : field.value} // Ensure value is not null for input
+                    value={field.value ?? ''}
                   />
                 </FormControl>
                 <FormDescription>0 to 100</FormDescription>
@@ -106,11 +141,11 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose }: VipNumb
               <FormItem>
                 <FormLabel>Selling Price (₹)</FormLabel>
                 <FormControl>
-                  <Input 
-                    type="number" 
-                    placeholder="Auto-calculated or manual" 
-                    {...field} 
-                    onChange={e => field.onChange(e.target.value)} // Pass string value
+                  <Input
+                    type="number"
+                    placeholder="Auto-calculated or manual"
+                    {...field}
+                    onChange={e => field.onChange(e.target.value === '' ? 0 : parseFloat(e.target.value))}
                   />
                 </FormControl>
                 <FormMessage />
@@ -127,11 +162,23 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose }: VipNumb
           name="categorySlug"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Category Slug</FormLabel>
-              <FormControl>
-                <Input placeholder="e.g., fancy-numbers-786" {...field} />
-              </FormControl>
-              <FormDescription>Enter the exact category slug.</FormDescription>
+              <FormLabel>Category</FormLabel>
+              <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a category" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  {categories.length === 0 && <SelectItem value="" disabled>No 'individual' type categories found</SelectItem>}
+                  {categories.map((category) => (
+                    <SelectItem key={category.id} value={category.slug}>
+                      {category.title} ({category.slug})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FormDescription>Select the category for this VIP number.</FormDescription>
               <FormMessage />
             </FormItem>
           )}
@@ -159,7 +206,7 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose }: VipNumb
             </FormItem>
           )}
         />
-        
+
         <FormField
           control={form.control}
           name="description"
@@ -167,7 +214,7 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose }: VipNumb
             <FormItem>
               <FormLabel>Description (Optional)</FormLabel>
               <FormControl>
-                <Textarea placeholder="e.g., Special sequence, easy to remember" {...field} />
+                <Textarea placeholder="e.g., Special sequence, easy to remember" {...field} value={field.value ?? ''} />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -181,7 +228,7 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose }: VipNumb
             <FormItem>
               <FormLabel>Image Hint (Optional)</FormLabel>
               <FormControl>
-                <Input placeholder="e.g., luxury phone, golden digits (1-2 words)" {...field} />
+                <Input placeholder="e.g., luxury phone, golden digits (1-2 words)" {...field} value={field.value ?? ''}/>
               </FormControl>
               <FormDescription>Keywords for AI image generation if needed.</FormDescription>
               <FormMessage />
@@ -192,12 +239,12 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose }: VipNumb
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <FormField
             control={form.control}
-            name="sumOfDigits"
+            name="totalDigits"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Sum of Digits (Optional)</FormLabel>
+                <FormLabel>Total Digits (Auto)</FormLabel>
                 <FormControl>
-                  <Input placeholder="e.g., 45" {...field} />
+                  <Input placeholder="Auto-calculated" {...field} readOnly />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -205,12 +252,12 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose }: VipNumb
           />
           <FormField
             control={form.control}
-            name="totalDigits"
+            name="sumOfDigits"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Total Digits (Optional)</FormLabel>
+                <FormLabel>Numerology Sum (Auto)</FormLabel>
                 <FormControl>
-                  <Input placeholder="e.g., 10" {...field} />
+                  <Input placeholder="Auto-calculated" {...field} readOnly />
                 </FormControl>
                 <FormMessage />
               </FormItem>

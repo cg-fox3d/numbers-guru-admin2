@@ -13,7 +13,12 @@ export const categorySchema = z.object({
     if (val && val.trim() !== '') {
       return slugify(val);
     }
-    return val;
+    // If title is available, generate slug from title
+    const title = ctx.originalInput?.title;
+    if (title && typeof title === 'string' && title.trim() !== '') {
+      return slugify(title);
+    }
+    return val; // Return original val if no title to derive from
   }),
   order: z.preprocess(
     (val) => (typeof val === 'string' && val.trim() !== '' ? parseInt(val, 10) : (typeof val === 'number' ? val : 0)),
@@ -29,41 +34,41 @@ export const vipNumberSchema = z.object({
   number: z.string().min(1, { message: 'VIP Number is required.' }).regex(/^\d+([-\s]?\d+)*$/, { message: 'Number must contain only digits and optional hyphens/spaces.' }),
   price: z.preprocess(
     (val) => {
-      if (typeof val === 'string' && val.trim() !== '') return parseFloat(val.replace(/,/g, ''));
-      if (typeof val === 'number') return val;
-      return undefined; 
+      if (typeof val === 'string' && val.trim() !== '') return Math.round(parseFloat(val.replace(/,/g, '')));
+      if (typeof val === 'number') return Math.round(val);
+      return undefined;
     },
-    z.number({ required_error: "Price is required.", invalid_type_error: "Price must be a number." }).min(0, { message: 'Price must be a positive number.' })
+    z.number({ required_error: "Price is required.", invalid_type_error: "Price must be an integer." }).min(0, { message: 'Price must be a positive integer.' }).int({ message: "Price must be an integer." })
   ),
   originalPrice: z.preprocess(
     (val) => {
-      if (typeof val === 'string' && val.trim() !== '') return parseFloat(val.replace(/,/g, ''));
-      if (typeof val === 'number') return val;
-      return null; 
+      if (typeof val === 'string' && val.trim() !== '') return Math.round(parseFloat(val.replace(/,/g, '')));
+      if (typeof val === 'number') return Math.round(val);
+      return null;
     },
-    z.number({ invalid_type_error: "Original price must be a number." }).min(0, { message: 'Original price must be positive.' }).optional().nullable()
+    z.number({ invalid_type_error: "Original price must be an integer." }).min(0, { message: 'Original price must be positive.' }).int({ message: "Original Price must be an integer." }).optional().nullable()
   ),
   discount: z.preprocess(
     (val) => {
       if (typeof val === 'string' && val.trim() !== '') return parseFloat(val.replace(/%/g, ''));
       if (typeof val === 'number') return val;
-      return null; 
+      return null;
     },
     z.number({ invalid_type_error: "Discount must be a number." }).min(0).max(100, { message: 'Discount must be between 0 and 100.' }).optional().nullable()
   ),
   status: z.enum(['available', 'sold', 'booked'], { required_error: 'Status is required.' }),
-  categorySlug: z.string().min(1, { message: 'Category Slug is required.' }),
+  categorySlug: z.string().min(1, { message: 'Category is required.' }),
   description: z.string().optional(),
   imageHint: z.string().max(50, { message: "Image hint cannot exceed 50 characters." }).optional(),
   isVip: z.boolean().optional().default(false),
-  sumOfDigits: z.string().optional(),
-  totalDigits: z.string().optional(),
+  sumOfDigits: z.string().optional(), // Will be auto-calculated
+  totalDigits: z.string().optional(), // Will be auto-calculated
 });
 
 export type VipNumberFormData = z.infer<typeof vipNumberSchema>;
 
 export const numberPackItemSchema = z.object({
-  id: z.string().optional(), 
+  id: z.string().optional(),
   originalVipNumberId: z.string().optional(), // ID of the VIP number if selected
   number: z.string().min(1, { message: 'Number is required.' }).regex(/^\d+([-\s]?\d+)*$/, { message: 'Number must contain only digits and optional hyphens/spaces.' }),
   price: z.preprocess(
@@ -106,6 +111,8 @@ export const numberPackSchema = z.object({
 
 export type NumberPackFormData = z.infer<typeof numberPackSchema>;
 
+
+// Kept for potential future use, currently ProductClientPage is not used
 export const productSchema = z.object({
   name: z.string().min(3, { message: 'Product name must be at least 3 characters.' }),
   type: z.enum(['VIP Number', 'Number Pack'], { required_error: 'Product type is required.' }),
