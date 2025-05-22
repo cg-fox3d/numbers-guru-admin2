@@ -4,7 +4,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, query, orderBy, Timestamp, doc, deleteDoc, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
-import type { NumberPack, Category } from '@/types';
+import type { NumberPack } from '@/types';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,7 +34,8 @@ interface NumberPacksTabProps {
 const PAGE_SIZE = 10;
 
 export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
-  const [numberPacksOnPage, setNumberPacksOnPage] = useState<NumberPack[]>([]);
+  const [allNumberPacks, setAllNumberPacks] = useState<NumberPack[]>([]); // Stores all fetched packs for current view if no pagination
+  const [numberPacksOnPage, setNumberPacksOnPage] = useState<NumberPack[]>([]); // Packs for current page
   const [filteredNumberPacks, setFilteredNumberPacks] = useState<NumberPack[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -46,20 +47,18 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
 
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [pageStartCursors, setPageStartCursors] = useState<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
-  const pageStartCursorsRef = useRef(pageStartCursors); // Ref to hold current cursors
-  
+  const pageStartCursorsRef = useRef(pageStartCursors);
+
   const [lastVisibleDoc, setLastVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [firstVisibleDoc, setFirstVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasNextPage, setHasNextPage] = useState(false);
 
-   useEffect(() => {
+  useEffect(() => {
     pageStartCursorsRef.current = pageStartCursors;
   }, [pageStartCursors]);
 
-
   const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null) => {
     let q = query(collection(db, 'numberPacks'), orderBy('createdAt', 'desc'));
-    
     if (cursor) {
       q = query(q, startAfter(cursor), limit(PAGE_SIZE + 1));
     } else {
@@ -76,22 +75,21 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
 
     try {
       let queryCursor: QueryDocumentSnapshot<DocumentData> | null = null;
+      const currentCursors = pageStartCursorsRef.current; // Read from ref
 
       if (options.isRefresh || pageIdxToLoad === 0) {
         queryCursor = null;
-        if (options.isRefresh) { 
-             setPageStartCursors([null]); 
+        if (options.isRefresh) {
+          setPageStartCursors([null]);
         }
-      } else if (pageIdxToLoad > 0 && pageIdxToLoad < pageStartCursorsRef.current.length) {
-        queryCursor = pageStartCursorsRef.current[pageIdxToLoad];
-      } else if (pageIdxToLoad > 0 && lastVisibleDoc && pageIdxToLoad === pageStartCursorsRef.current.length) {
-        queryCursor = lastVisibleDoc;
+      } else if (pageIdxToLoad > 0 && pageIdxToLoad < currentCursors.length) {
+        queryCursor = currentCursors[pageIdxToLoad];
+      } else if (pageIdxToLoad > 0 && lastVisibleDoc && pageIdxToLoad === currentCursors.length) {
+        queryCursor = lastVisibleDoc; // Use state variable directly here for "next" logic
       } else {
-        // This case should ideally not be hit if navigation is controlled properly
-        console.warn("Attempting to load page without a valid cursor strategy", pageIdxToLoad);
-        queryCursor = lastVisibleDoc; // Fallback, might need adjustment
+        console.warn("NumberPacksTab: Attempting to load page without a valid cursor strategy", { pageIdxToLoad, currentCursorsLength: currentCursors.length });
+        queryCursor = (pageIdxToLoad > currentCursors.length -1 && lastVisibleDoc) ? lastVisibleDoc : null;
       }
-
 
       const packsQuery = buildPageQuery(queryCursor);
       const documentSnapshots = await getDocs(packsQuery);
@@ -116,18 +114,10 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
       
       if (options.isRefresh || pageIdxToLoad === 0) {
         setPageStartCursors(newFirstVisibleDoc ? [null, newFirstVisibleDoc] : [null]);
-      } else if (pageIdxToLoad >= pageStartCursorsRef.current.length && newFirstVisibleDoc && queryCursor === lastVisibleDoc) {
+      } else if (pageIdxToLoad >= currentCursors.length && newFirstVisibleDoc) {
         // Navigated to a new "next" page
-        setPageStartCursors(prev => {
-          const newCursors = [...prev];
-          if (newCursors.length <= pageIdxToLoad) { // Ensure not to duplicate if already set by another logic path
-             newCursors[pageIdxToLoad] = newFirstVisibleDoc;
-          }
-          return newCursors;
-        });
+        setPageStartCursors(prev => [...prev, newFirstVisibleDoc]);
       }
-
-
     } catch (error) {
       console.error("Error fetching number packs: ", error);
       toast({
@@ -140,11 +130,23 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [toast, buildPageQuery, lastVisibleDoc, setIsLoading, setNumberPacksOnPage, setHasNextPage, setLastVisibleDoc, setSearchTerm, setPageStartCursors, setFirstVisibleDoc]);
+  }, [
+    toast, 
+    buildPageQuery, 
+    setIsLoading, 
+    setNumberPacksOnPage, 
+    setHasNextPage, 
+    setLastVisibleDoc, 
+    setSearchTerm, 
+    setPageStartCursors, 
+    setFirstVisibleDoc
+    // Removed lastVisibleDoc from dependencies to break potential loops
+  ]);
 
   useEffect(() => {
-     const isRefreshForEffect = currentPageIndex === 0 && (pageStartCursorsRef.current.length <=1 || !pageStartCursorsRef.current[0]);
-    loadNumberPacks(currentPageIndex, {isRefresh: isRefreshForEffect });
+    // Refresh if on page 0, otherwise just load the current page.
+    // The `loadNumberPacks` function itself will handle full cursor reset if options.isRefresh is true.
+    loadNumberPacks(currentPageIndex, {isRefresh: currentPageIndex === 0 });
   }, [currentPageIndex, loadNumberPacks]);
 
   useEffect(() => {
@@ -188,9 +190,8 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
       });
       const isLastItemOnPage = numberPacksOnPage.length === 1;
       if (isLastItemOnPage && currentPageIndex > 0) {
-        setCurrentPageIndex(prev => prev -1); // Go to previous page, which will trigger load
+        setCurrentPageIndex(prev => prev -1); 
       } else {
-        // Refresh current page (or page 0 if it was the first page and now empty)
         loadNumberPacks(isLastItemOnPage && currentPageIndex === 0 ? 0 : currentPageIndex, { isRefresh: true });
       }
     } catch (error) {
@@ -207,7 +208,6 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
   };
 
   const onDialogSuccess = useCallback(() => {
-    // Refresh current page data after add/edit
     loadNumberPacks(currentPageIndex, {isRefresh: true}); 
   }, [loadNumberPacks, currentPageIndex]);
   
@@ -215,7 +215,7 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
     if (currentPageIndex === 0) {
         loadNumberPacks(0, { isRefresh: true });
     } else {
-        setCurrentPageIndex(0); // This will trigger useEffect to load page 0 with refresh logic
+        setCurrentPageIndex(0); 
     }
   }, [loadNumberPacks, currentPageIndex]);
 
@@ -416,3 +416,4 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
     </Card>
   );
 }
+
