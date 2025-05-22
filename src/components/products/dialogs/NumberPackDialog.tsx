@@ -26,20 +26,20 @@ export function NumberPackDialog({ isOpen, onClose, numberPack, onSuccess }: Num
   const [categories, setCategories] = useState<Category[]>([]);
   const [isLoadingCategories, setIsLoadingCategories] = useState(false);
 
-  const defaultFormValues: NumberPackFormData = {
+  const defaultFormValuesRef = React.useRef<NumberPackFormData>({
     name: '',
-    numbers: [{ number: '', price: 0 }],
-    totalOriginalPrice: 0, // Will be auto-calculated
+    numbers: [{ number: '', price: 0, originalVipNumberId: undefined }],
+    totalOriginalPrice: 0,
     status: 'available',
     categorySlug: '',
     description: '',
     imageHint: '',
     isVipPack: false,
-  };
+  });
   
   const form = useForm<NumberPackFormData>({
     resolver: zodResolver(numberPackSchema),
-    defaultValues: defaultFormValues,
+    defaultValues: defaultFormValuesRef.current,
   });
 
   const fetchCategories = useCallback(async () => {
@@ -48,15 +48,10 @@ export function NumberPackDialog({ isOpen, onClose, numberPack, onSuccess }: Num
       const q = query(collection(db, 'categories'), where('type', '==', 'pack'), orderBy('order', 'asc'));
       const querySnapshot = await getDocs(q);
       const fetchedCategories: Category[] = [];
-      querySnapshot.forEach((doc) => {
-        fetchedCategories.push({ id: doc.id, ...doc.data() } as Category);
+      querySnapshot.forEach((docSn) => {
+        fetchedCategories.push({ id: docSn.id, ...docSn.data() } as Category);
       });
       setCategories(fetchedCategories);
-      if (fetchedCategories.length > 0 && !numberPack && !form.getValues('categorySlug')) {
-        // Pre-select first category if adding new and no slug set
-        // form.setValue('categorySlug', fetchedCategories[0].slug); 
-        // Decided against pre-selection to allow explicit user choice
-      }
     } catch (error) {
       console.error("Error fetching categories for Number Pack form: ", error);
       toast({
@@ -67,7 +62,7 @@ export function NumberPackDialog({ isOpen, onClose, numberPack, onSuccess }: Num
     } finally {
       setIsLoadingCategories(false);
     }
-  }, [toast, numberPack, form]);
+  }, [toast]); // Removed setCategories and setIsLoadingCategories as they are stable
 
   useEffect(() => {
     if (isOpen) {
@@ -79,8 +74,8 @@ export function NumberPackDialog({ isOpen, onClose, numberPack, onSuccess }: Num
             originalVipNumberId: n.originalVipNumberId, 
             number: n.number, 
             price: n.price 
-          })) || [{ number: '', price: 0 }],
-          totalOriginalPrice: numberPack.totalOriginalPrice ?? 0, // Will be recalculated by form
+          })) || [{ number: '', price: 0, originalVipNumberId: undefined }],
+          totalOriginalPrice: numberPack.totalOriginalPrice ?? 0, 
           status: numberPack.status,
           categorySlug: numberPack.categorySlug || '',
           description: numberPack.description || '',
@@ -88,35 +83,34 @@ export function NumberPackDialog({ isOpen, onClose, numberPack, onSuccess }: Num
           isVipPack: numberPack.isVipPack || false,
         });
       } else {
-        form.reset(defaultFormValues);
+        form.reset(defaultFormValuesRef.current);
       }
     }
-  }, [numberPack, form, isOpen, fetchCategories, defaultFormValues]);
+  }, [numberPack, form, isOpen, fetchCategories]);
 
 
   const handleFormSubmit = async (data: NumberPackFormData) => {
     setIsSubmitting(true);
     
-    // totalOriginalPrice is now auto-calculated and set by the form's useEffect
-    // Ensure numbers have numeric prices
     const processedNumbers = data.numbers.map(n => ({
       ...n,
       price: Number(n.price),
     }));
 
-    const dataToSave = {
+    const dataToSave: Partial<NumberPackFormData> & { updatedAt: Timestamp, createdAt?: Timestamp } = {
       ...data,
       numbers: processedNumbers,
-      totalOriginalPrice: Number(data.totalOriginalPrice) || 0, // Ensure it's a number
+      totalOriginalPrice: Number(data.totalOriginalPrice) || 0,
       updatedAt: serverTimestamp() as Timestamp,
     };
     
     Object.keys(dataToSave).forEach(keyStr => {
       const key = keyStr as keyof typeof dataToSave;
       if (dataToSave[key] === undefined) {
-        delete dataToSave[key];
+        delete (dataToSave as any)[key]; // Use any to bypass strict type checking for delete
       }
     });
+
 
     if (!dataToSave.categorySlug || dataToSave.categorySlug.trim() === '') {
         toast({
@@ -159,10 +153,16 @@ export function NumberPackDialog({ isOpen, onClose, numberPack, onSuccess }: Num
     }
   };
 
-  if (!isOpen) return null;
+  const handleOpenChange = useCallback((openStatus: boolean) => {
+    if (!openStatus) {
+      onClose();
+    }
+  }, [onClose]);
+
+  if (!isOpen && !numberPack && !isLoadingCategories) return null;
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-3xl"> 
         <DialogHeader>
           <DialogTitle>{numberPack ? 'Edit Number Pack' : 'Add New Number Pack'}</DialogTitle>

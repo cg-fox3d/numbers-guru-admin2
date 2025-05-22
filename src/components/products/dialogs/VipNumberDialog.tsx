@@ -26,23 +26,23 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
   const [categories, setCategories] = useState<Category[]>([]);
   const [isLoadingCategories, setIsLoadingCategories] = useState(false);
 
-  const defaultFormValues: VipNumberFormData = {
+  const defaultFormValuesRef = React.useRef<VipNumberFormData>({
     number: '',
     price: 0,
     originalPrice: null,
     discount: null,
     status: 'available',
-    categorySlug: '', // Ensure this defaults to an empty string
+    categorySlug: '', 
     description: '',
     imageHint: '',
     isVip: false,
     sumOfDigits: '',
     totalDigits: '',
-  };
+  });
 
   const form = useForm<VipNumberFormData>({
     resolver: zodResolver(vipNumberSchema),
-    defaultValues: defaultFormValues,
+    defaultValues: defaultFormValuesRef.current,
   });
 
   const fetchCategories = useCallback(async () => {
@@ -51,11 +51,10 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
       const q = query(collection(db, 'categories'), where('type', '==', 'individual'), orderBy('order', 'asc'));
       const querySnapshot = await getDocs(q);
       const fetchedCategories: Category[] = [];
-      querySnapshot.forEach((doc) => {
-        fetchedCategories.push({ id: doc.id, ...doc.data() } as Category);
+      querySnapshot.forEach((docSn) => {
+        fetchedCategories.push({ id: docSn.id, ...docSn.data() } as Category);
       });
       setCategories(fetchedCategories);
-      // No pre-selection logic here, form default or existing value will be used.
     } catch (error) {
       console.error("Error fetching categories for VIP Number form: ", error);
       toast({
@@ -79,7 +78,7 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
           originalPrice: vipNumber.originalPrice ?? null,
           discount: vipNumber.discount ?? null,
           status: vipNumber.status,
-          categorySlug: vipNumber.categorySlug || '', // Ensure empty string if null/undefined
+          categorySlug: vipNumber.categorySlug || '',
           description: vipNumber.description || '',
           imageHint: vipNumber.imageHint || '',
           isVip: vipNumber.isVip || false,
@@ -87,7 +86,7 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
           totalDigits: vipNumber.totalDigits || '',
         });
       } else {
-        form.reset(defaultFormValues);
+        form.reset(defaultFormValuesRef.current);
       }
     }
   }, [vipNumber, form, isOpen, fetchCategories]);
@@ -107,45 +106,39 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
         return;
     }
     
-    // Duplicate check
     try {
       const vipNumbersRef = collection(db, 'vipNumbers');
       let q;
+      let isDuplicate = false;
 
-      if (vipNumber && vipNumber.id) { // Editing existing number
-        // Only check if number string actually changed
-        if (processedNumber !== (vipNumber.number || '').trim()) { 
+      if (vipNumber && vipNumber.id) { 
+        if (processedNumber.toLowerCase() !== (vipNumber.number || '').trim().toLowerCase()) { 
           q = query(vipNumbersRef, where('number', '==', processedNumber));
           const querySnapshot = await getDocs(q);
-          let isActualDuplicate = false;
           querySnapshot.forEach(docSnap => {
             if (docSnap.id !== vipNumber.id) {
-              isActualDuplicate = true;
+              isDuplicate = true;
             }
           });
-          if (isActualDuplicate) {
-            toast({
-              title: 'Duplicate VIP Number',
-              description: `The VIP Number "${processedNumber}" already exists. Please enter a unique number.`,
-              variant: 'destructive',
-            });
-            setIsSubmitting(false);
-            return;
-          }
         }
-      } else { // Adding new number
+      } else { 
         q = query(vipNumbersRef, where('number', '==', processedNumber));
         const querySnapshot = await getDocs(q);
         if (!querySnapshot.empty) {
-          toast({
-            title: 'Duplicate VIP Number',
-            description: `The VIP Number "${processedNumber}" already exists. Please enter a unique number.`,
-            variant: 'destructive',
-          });
-          setIsSubmitting(false);
-          return;
+          isDuplicate = true;
         }
       }
+
+      if (isDuplicate) {
+        toast({
+          title: 'Duplicate VIP Number',
+          description: `The VIP Number "${processedNumber}" already exists. Please enter a unique number.`,
+          variant: 'destructive',
+        });
+        setIsSubmitting(false);
+        return;
+      }
+
     } catch (error) {
       console.error('Error checking for duplicate VIP number:', error);
       toast({
@@ -166,7 +159,6 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
       updatedAt: serverTimestamp() as Timestamp,
     };
     
-    // Remove undefined fields to avoid Firestore errors
     Object.keys(dataToSave).forEach(keyStr => {
       const key = keyStr as keyof typeof dataToSave;
       if (dataToSave[key] === undefined) {
@@ -214,11 +206,17 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
       setIsSubmitting(false);
     }
   };
+  
+  const handleOpenChange = useCallback((openStatus: boolean) => {
+    if (!openStatus) {
+      onClose();
+    }
+  }, [onClose]);
 
-  if (!isOpen) return null;
+  if (!isOpen && !vipNumber && !isLoadingCategories) return null; 
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{vipNumber ? 'Edit VIP Number' : 'Add New VIP Number'}</DialogTitle>
@@ -245,4 +243,3 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
     </Dialog>
   );
 }
-

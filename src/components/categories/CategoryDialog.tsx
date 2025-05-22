@@ -1,11 +1,11 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { CategoryForm } from './CategoryForm';
+import { CategoryForm } from '@/components/categories/CategoryForm';
 import type { Category, CategoryFormData } from '@/types';
 import { categorySchema } from '@/lib/schemas';
 import { db } from '@/lib/firebase';
@@ -24,14 +24,16 @@ export function CategoryDialog({ isOpen, onClose, category, onSuccess }: Categor
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const defaultFormValuesRef = React.useRef<CategoryFormData>({
+    title: '',
+    slug: '',
+    order: 0,
+    type: 'individual',
+  });
+
   const form = useForm<CategoryFormData>({
     resolver: zodResolver(categorySchema),
-    defaultValues: {
-      title: '',
-      slug: '',
-      order: 0,
-      type: 'individual',
-    },
+    defaultValues: defaultFormValuesRef.current,
   });
 
   useEffect(() => {
@@ -44,12 +46,7 @@ export function CategoryDialog({ isOpen, onClose, category, onSuccess }: Categor
           type: category.type,
         });
       } else {
-        form.reset({ // Default values for new category
-          title: '',
-          slug: '',
-          order: 0,
-          type: 'individual',
-        });
+        form.reset(defaultFormValuesRef.current);
       }
     }
   }, [category, form, isOpen]);
@@ -57,7 +54,6 @@ export function CategoryDialog({ isOpen, onClose, category, onSuccess }: Categor
   const handleFormSubmit = async (data: CategoryFormData) => {
     setIsSubmitting(true);
     
-    // Ensure slug is generated if not provided or is empty
     const finalSlug = (data.slug && data.slug.trim() !== '') ? slugify(data.slug) : slugify(data.title);
     if (!finalSlug) {
         toast({
@@ -69,35 +65,31 @@ export function CategoryDialog({ isOpen, onClose, category, onSuccess }: Categor
         return;
     }
 
-    const dataToSave = {
+    const dataToSave: Partial<CategoryFormData> & { updatedAt?: Timestamp, createdAt?: Timestamp } = {
       ...data,
       slug: finalSlug,
-      order: Number(data.order) // Ensure order is a number
+      order: Number(data.order)
     };
 
     try {
       if (category && category.id) {
-        // Update existing category
         const categoryRef = doc(db, 'categories', category.id);
-        // Note: createdAt is not updated on edit
+        dataToSave.updatedAt = serverTimestamp() as Timestamp;
         await updateDoc(categoryRef, dataToSave);
         toast({
           title: 'Category Updated',
           description: `Category "${data.title}" has been successfully updated.`,
         });
       } else {
-        // Add new category
-        await addDoc(collection(db, 'categories'), {
-          ...dataToSave,
-          createdAt: serverTimestamp() as Timestamp, // Add createdAt for new categories
-        });
+        dataToSave.createdAt = serverTimestamp() as Timestamp;
+        await addDoc(collection(db, 'categories'), dataToSave);
         toast({
           title: 'Category Added',
           description: `Category "${data.title}" has been successfully added.`,
         });
       }
-      onSuccess?.(); // Call onSuccess callback if provided (e.g., to re-fetch data)
-      onClose(); // Close the dialog
+      onSuccess?.(); 
+      onClose(); 
     } catch (error) {
       console.error('Error saving category:', error);
       toast({
@@ -110,8 +102,16 @@ export function CategoryDialog({ isOpen, onClose, category, onSuccess }: Categor
     }
   };
 
+  const handleOpenChange = useCallback((openStatus: boolean) => {
+    if (!openStatus) {
+      onClose();
+    }
+  }, [onClose]);
+
+  if (!isOpen && !category) return null; // Optimization: Don't render if closed and no category (prevents issues on initial load sometimes)
+
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{category ? 'Edit Category' : 'Add New Category'}</DialogTitle>
@@ -125,7 +125,6 @@ export function CategoryDialog({ isOpen, onClose, category, onSuccess }: Categor
           isSubmitting={isSubmitting}
           onClose={onClose} 
         />
-        {/* DialogFooter is removed as actions are in CategoryForm */}
       </DialogContent>
     </Dialog>
   );
