@@ -1,6 +1,7 @@
 
 'use client';
 
+import * as React from 'react'; // Added this import
 import { useEffect, useState, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -68,7 +69,7 @@ export function CategoryDialog({ isOpen, onClose, category, onSuccess }: Categor
     const dataToSave: Partial<CategoryFormData> & { updatedAt?: Timestamp, createdAt?: Timestamp } = {
       ...data,
       slug: finalSlug,
-      order: Number(data.order)
+      order: Number(data.order) // Ensure order is a number
     };
 
     try {
@@ -82,6 +83,7 @@ export function CategoryDialog({ isOpen, onClose, category, onSuccess }: Categor
         });
       } else {
         dataToSave.createdAt = serverTimestamp() as Timestamp;
+        dataToSave.updatedAt = serverTimestamp() as Timestamp; // Also set updatedAt on creation
         await addDoc(collection(db, 'categories'), dataToSave);
         toast({
           title: 'Category Added',
@@ -108,7 +110,7 @@ export function CategoryDialog({ isOpen, onClose, category, onSuccess }: Categor
     }
   }, [onClose]);
 
-  if (!isOpen && !category) return null; // Optimization: Don't render if closed and no category (prevents issues on initial load sometimes)
+  if (!isOpen && !category) return null; 
 
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>

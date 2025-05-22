@@ -1,6 +1,7 @@
 
 'use client';
 
+import * as React from 'react'; // Added this import
 import { useEffect, useState, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -59,10 +60,11 @@ export function NumberPackDialog({ isOpen, onClose, numberPack, onSuccess }: Num
         description: (error as Error).message || "Could not load categories.",
         variant: "destructive",
       });
+      setCategories([]); // Set to empty array on error
     } finally {
       setIsLoadingCategories(false);
     }
-  }, [toast]); // Removed setCategories and setIsLoadingCategories as they are stable
+  }, [toast]); // Removed setCategories and setIsLoadingCategories as they are stable setters
 
   useEffect(() => {
     if (isOpen) {
@@ -97,17 +99,27 @@ export function NumberPackDialog({ isOpen, onClose, numberPack, onSuccess }: Num
       price: Number(n.price),
     }));
 
-    const dataToSave: Partial<NumberPackFormData> & { updatedAt: Timestamp, createdAt?: Timestamp } = {
-      ...data,
+    const dataToSave: Partial<Omit<NumberPackFormData, 'totalOriginalPrice'>> & { 
+        totalOriginalPrice?: number | null, // Explicitly type totalOriginalPrice for saving
+        updatedAt: Timestamp, 
+        createdAt?: Timestamp 
+      } = {
+      name: data.name,
       numbers: processedNumbers,
-      totalOriginalPrice: Number(data.totalOriginalPrice) || 0,
+      // packPrice removed
+      status: data.status,
+      categorySlug: data.categorySlug,
+      description: data.description || undefined, // ensure empty strings become undefined
+      imageHint: data.imageHint || undefined,
+      isVipPack: data.isVipPack,
+      totalOriginalPrice: data.totalOriginalPrice, // Will be auto-calculated but schema allows it
       updatedAt: serverTimestamp() as Timestamp,
     };
     
     Object.keys(dataToSave).forEach(keyStr => {
       const key = keyStr as keyof typeof dataToSave;
       if (dataToSave[key] === undefined) {
-        delete (dataToSave as any)[key]; // Use any to bypass strict type checking for delete
+        delete (dataToSave as any)[key]; 
       }
     });
 
@@ -115,7 +127,7 @@ export function NumberPackDialog({ isOpen, onClose, numberPack, onSuccess }: Num
     if (!dataToSave.categorySlug || dataToSave.categorySlug.trim() === '') {
         toast({
             title: 'Validation Error',
-            description: 'Category Slug is required for the pack.',
+            description: 'Category is required for the pack.',
             variant: 'destructive',
         });
         setIsSubmitting(false);
@@ -175,6 +187,7 @@ export function NumberPackDialog({ isOpen, onClose, numberPack, onSuccess }: Num
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-20 w-full" />
             <Skeleton className="h-10 w-1/2" />
+            <Skeleton className="h-10 w-full mt-2" />
           </div>
         ) : (
           <NumberPackForm
