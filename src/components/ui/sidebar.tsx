@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button"
 import type { ButtonProps } from "@/components/ui/button" // Import ButtonProps for better typing
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
-import { Sheet, SheetContent } from "@/components/ui/sheet"
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet" // Added SheetHeader, SheetTitle
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Tooltip,
@@ -208,7 +208,12 @@ const Sidebar = React.forwardRef<
             }
             side={side}
           >
-            <div className="flex h-full w-full flex-col">{children}</div>
+            {/* Added SheetHeader and SheetTitle for accessibility */}
+            <SheetHeader className="p-2 border-b border-sidebar-border"> {/* Adjust padding as needed */}
+              <SheetTitle className="sr-only">Main Menu</SheetTitle>
+            </SheetHeader>
+            {/* Ensure the main content area flexes correctly */}
+            <div className="flex flex-1 flex-col overflow-hidden">{children}</div>
           </SheetContent>
         </Sheet>
       )
@@ -263,8 +268,8 @@ Sidebar.displayName = "Sidebar"
 
 const SidebarTrigger = React.forwardRef<
   React.ElementRef<typeof Button>,
-  ButtonProps // Use ButtonProps which includes asChild and children
->(({ className, onClick, children, asChild, ...props }, ref) => { // Explicitly destructure asChild and children
+  ButtonProps 
+>(({ className, onClick, children, asChild, ...props }, ref) => { 
   const { toggleSidebar } = useSidebar();
 
   return (
@@ -278,11 +283,9 @@ const SidebarTrigger = React.forwardRef<
         onClick?.(event);
         toggleSidebar();
       }}
-      asChild={asChild} // Pass asChild to the underlying Button
-      {...props} // Spread other props (e.g., data attributes)
+      asChild={asChild} 
+      {...props} 
     >
-      {/* If asChild is true, render the children passed to SidebarTrigger.
-          Otherwise, render the default PanelLeft icon and sr-only span. */}
       {asChild ? children : (
         <>
           <PanelLeft />
@@ -580,21 +583,19 @@ const SidebarMenuButton = React.forwardRef<
       return button
     }
 
-    if (typeof tooltip === "string") {
-      tooltip = {
-        children: tooltip,
-      }
-    }
+    const tooltipProps = typeof tooltip === "string" ? { children: tooltip } : tooltip;
+    const shouldShowTooltip = state === "collapsed" && !isMobile;
 
     return (
       <Tooltip>
         <TooltipTrigger asChild>{button}</TooltipTrigger>
-        <TooltipContent
-          side="right"
-          align="center"
-          hidden={state !== "collapsed" || isMobile}
-          {...tooltip}
-        />
+        {shouldShowTooltip && (
+          <TooltipContent
+            side="right"
+            align="center"
+            {...tooltipProps} 
+          />
+        )}
       </Tooltip>
     )
   }
