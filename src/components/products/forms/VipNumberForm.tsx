@@ -35,10 +35,13 @@ const calculateNumerologySum = (numberStr: string): string => {
   return sum.toString();
 };
 
-const calculateTotalDigits = (numberStr: string): string => {
+// Helper function to calculate the sum of all digits in the number string
+const calculateSumOfAllDigits = (numberStr: string): string => {
     if (!numberStr) return '';
     const digitsOnly = numberStr.replace(/\D/g, '');
-    return digitsOnly.length.toString();
+    if (!digitsOnly) return '';
+    const sum = digitsOnly.split('').reduce((acc, digit) => acc + parseInt(digit, 10), 0);
+    return sum.toString();
 };
 
 
@@ -49,11 +52,11 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose, categorie
   const discountInput = watch('discount');
 
   useEffect(() => {
-    if (numberInput !== undefined) { // Check if numberInput is defined to avoid issues on initial render
-      const total = calculateTotalDigits(numberInput);
-      const sum = calculateNumerologySum(numberInput);
-      setValue('totalDigits', total, { shouldValidate: false });
-      setValue('sumOfDigits', sum, { shouldValidate: false });
+    if (numberInput !== undefined) { 
+      const totalSumOfAllDigits = calculateSumOfAllDigits(numberInput);
+      const numerologySum = calculateNumerologySum(numberInput);
+      setValue('totalDigits', totalSumOfAllDigits, { shouldValidate: false });
+      setValue('sumOfDigits', numerologySum, { shouldValidate: false });
     }
   }, [numberInput, setValue]);
 
@@ -111,12 +114,12 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose, categorie
                     type="number"
                     placeholder="e.g., 60000"
                     {...field}
-                    onChange={e => field.onChange(e.target.value === '' ? null : parseFloat(e.target.value))}
-                    onBlur={(e) => {
-                        field.onBlur(); // Call original onBlur
-                        handleCalculatePrice(); // Then calculate price
-                    }}
                     value={field.value ?? ''}
+                    onChange={e => field.onChange(e.target.value)} // Pass string for Zod to preprocess
+                    onBlur={(e) => {
+                        field.onBlur(); 
+                        handleCalculatePrice(); 
+                    }}
                   />
                 </FormControl>
                 <FormMessage />
@@ -135,14 +138,14 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose, categorie
                     placeholder="e.g., 10"
                     step="0.01"
                     {...field}
-                    onChange={e => field.onChange(e.target.value === '' ? null : parseFloat(e.target.value))}
+                    value={field.value ?? ''}
+                    onChange={e => field.onChange(e.target.value)} // Pass string for Zod to preprocess
                     onBlur={(e) => {
-                        field.onBlur(); // Call original onBlur
-                        handleCalculatePrice(); // Then calculate price
+                        field.onBlur();
+                        handleCalculatePrice();
                     }}
                     min="0"
                     max="100"
-                    value={field.value ?? ''}
                   />
                 </FormControl>
                 <FormDescription>0 to 100</FormDescription>
@@ -161,7 +164,8 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose, categorie
                     type="number"
                     placeholder="Auto-calculated or manual"
                     {...field}
-                    onChange={e => field.onChange(e.target.value === '' ? 0 : parseFloat(e.target.value))}
+                    value={field.value ?? ''}
+                    onChange={e => field.onChange(e.target.value)} // Pass string for Zod to preprocess
                   />
                 </FormControl>
                 <FormMessage />
@@ -179,7 +183,7 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose, categorie
           render={({ field }) => (
             <FormItem>
               <FormLabel>Category</FormLabel>
-              <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value || ""}>
+              <Select onValueChange={field.onChange} value={field.value || ""} defaultValue={field.value || ""}>
                 <FormControl>
                   <SelectTrigger>
                     <SelectValue placeholder="Select a category" />
@@ -262,7 +266,7 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose, categorie
             name="totalDigits"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Total Digits (Auto)</FormLabel>
+                <FormLabel>Sum of All Digits (Auto)</FormLabel>
                 <FormControl>
                   <Input placeholder="Auto-calculated" {...field} readOnly value={field.value ?? ''} />
                 </FormControl>
