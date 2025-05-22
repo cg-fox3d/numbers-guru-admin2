@@ -13,7 +13,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { PlusCircle, Trash2, ChevronsUpDown, CheckIcon } from 'lucide-react';
-import type { NumberPackFormData, NumberPackItemFormData, VipNumber } from '@/types';
+import type { NumberPackFormData, NumberPackItemFormData, VipNumber, Category } from '@/types';
 import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
 import { cn } from '@/lib/utils';
@@ -24,10 +24,11 @@ interface NumberPackFormProps {
   onSubmit: (data: NumberPackFormData) => Promise<void>;
   isSubmitting: boolean;
   onClose?: () => void;
+  categories: Category[];
 }
 
-export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: NumberPackFormProps) {
-  const { fields, append, remove } = useFieldArray({
+export function NumberPackForm({ form, onSubmit, isSubmitting, onClose, categories }: NumberPackFormProps) {
+  const { fields, append, remove, update } = useFieldArray({
     control: form.control,
     name: "numbers",
   });
@@ -37,6 +38,18 @@ export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: Number
   const [isVipComboboxOpen, setIsVipComboboxOpen] = useState(false);
   const [vipSearchTerm, setVipSearchTerm] = useState("");
   const { toast } = useToast();
+
+  const numbersInPack = form.watch('numbers');
+
+  useEffect(() => {
+    if (numbersInPack) {
+      const calculatedTotal = numbersInPack.reduce((sum, item) => {
+        const price = typeof item.price === 'number' ? item.price : parseFloat(String(item.price) || '0');
+        return sum + (isNaN(price) ? 0 : price);
+      }, 0);
+      form.setValue('totalOriginalPrice', calculatedTotal, { shouldValidate: true });
+    }
+  }, [numbersInPack, form]);
 
   useEffect(() => {
     const fetchVips = async () => {
@@ -87,6 +100,7 @@ export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: Number
     append({ number: '', price: 0, originalVipNumberId: undefined } as NumberPackItemFormData);
   };
 
+  const validCategories = categories.filter(category => category.slug && category.slug.trim() !== '');
 
   return (
     <Form {...form}>
@@ -110,57 +124,53 @@ export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: Number
           name="categorySlug"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Category Slug</FormLabel>
-              <FormControl>
-                <Input placeholder="e.g., family-packs" {...field} />
-              </FormControl>
-              <FormDescription>Enter the exact category slug for this pack type.</FormDescription>
+              <FormLabel>Category</FormLabel>
+              <Select onValueChange={field.onChange} value={field.value || ""} defaultValue={field.value || ""}>
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a category for the pack" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  {validCategories.length === 0 && (
+                     <SelectItem value="placeholder-disabled" disabled>
+                      No 'pack' type categories found
+                    </SelectItem>
+                  )}
+                  {validCategories.map((category) => (
+                    <SelectItem key={category.id} value={category.slug}>
+                      {category.title} ({category.slug})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FormDescription>Select the category for this number pack.</FormDescription>
               <FormMessage />
             </FormItem>
           )}
         />
         
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField
-            control={form.control}
-            name="packPrice"
-            render={({ field }) => (
-                <FormItem>
-                <FormLabel>Pack Selling Price (₹)</FormLabel>
-                <FormControl>
-                    <Input 
-                    type="number" 
-                    placeholder="e.g., 5000" 
-                    {...field} 
-                    onChange={e => field.onChange(e.target.value === '' ? undefined : parseFloat(e.target.value))}
-                    />
-                </FormControl>
-                <FormMessage />
-                </FormItem>
-            )}
-            />
-            <FormField
-            control={form.control}
-            name="totalOriginalPrice"
-            render={({ field }) => (
-                <FormItem>
-                <FormLabel>Total Original Price (Optional, ₹)</FormLabel>
-                <FormControl>
-                    <Input 
-                    type="number" 
-                    placeholder="e.g., 6000" 
-                    {...field} 
-                    value={field.value ?? ''}
-                    onChange={e => field.onChange(e.target.value === '' ? null : parseFloat(e.target.value))}
-                    />
-                </FormControl>
-                <FormDescription>Sum of original prices of numbers in pack.</FormDescription>
-                <FormMessage />
-                </FormItem>
-            )}
-            />
-        </div>
-
+        <FormField
+          control={form.control}
+          name="totalOriginalPrice"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Total Original Price (₹) (Auto-calculated)</FormLabel>
+              <FormControl>
+                <Input 
+                  type="number" 
+                  placeholder="Auto-calculated sum of item prices" 
+                  {...field} 
+                  value={field.value ?? ''}
+                  readOnly 
+                  className="bg-muted/50 cursor-not-allowed"
+                />
+              </FormControl>
+              <FormDescription>Sum of individual item prices in the pack.</FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
 
         <FormField
           control={form.control}
@@ -177,6 +187,7 @@ export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: Number
                 <SelectContent>
                   <SelectItem value="available">Available</SelectItem>
                   <SelectItem value="sold">Sold</SelectItem>
+                  <SelectItem value="partially-sold">Partially Sold</SelectItem>
                 </SelectContent>
               </Select>
               <FormMessage />
@@ -319,7 +330,7 @@ export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: Number
                 name={`numbers.${index}.price`}
                 render={({ field }) => (
                   <FormItem className="w-32">
-                     <FormLabel className="text-xs">Price in Pack (₹)</FormLabel>
+                     <FormLabel className="text-xs">Item Price (₹)</FormLabel>
                     <FormControl>
                       <Input 
                         type="number" 
@@ -372,4 +383,3 @@ export function NumberPackForm({ form, onSubmit, isSubmitting, onClose }: Number
     </Form>
   );
 }
-

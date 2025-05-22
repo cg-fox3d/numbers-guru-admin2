@@ -36,7 +36,7 @@ export const vipNumberSchema = z.object({
     (val) => {
       if (typeof val === 'string' && val.trim() !== '') return Math.round(parseFloat(val.replace(/,/g, '')));
       if (typeof val === 'number') return Math.round(val);
-      return undefined;
+      return undefined; // Let Zod handle required error if undefined
     },
     z.number({ required_error: "Price is required.", invalid_type_error: "Price must be an integer." }).min(0, { message: 'Price must be a positive integer.' }).int({ message: "Price must be an integer." })
   ),
@@ -44,7 +44,7 @@ export const vipNumberSchema = z.object({
     (val) => {
       if (typeof val === 'string' && val.trim() !== '') return Math.round(parseFloat(val.replace(/,/g, '')));
       if (typeof val === 'number') return Math.round(val);
-      return null;
+      return null; // Allow null for optional field
     },
     z.number({ invalid_type_error: "Original price must be an integer." }).min(0, { message: 'Original price must be positive.' }).int({ message: "Original Price must be an integer." }).optional().nullable()
   ),
@@ -52,7 +52,7 @@ export const vipNumberSchema = z.object({
     (val) => {
       if (typeof val === 'string' && val.trim() !== '') return parseFloat(val.replace(/%/g, ''));
       if (typeof val === 'number') return val;
-      return null;
+      return null; // Allow null for optional field
     },
     z.number({ invalid_type_error: "Discount must be a number." }).min(0).max(100, { message: 'Discount must be between 0 and 100.' }).optional().nullable()
   ),
@@ -86,15 +86,8 @@ export type NumberPackItemFormData = z.infer<typeof numberPackItemSchema>;
 export const numberPackSchema = z.object({
   name: z.string().min(3, { message: 'Pack name must be at least 3 characters.' }),
   numbers: z.array(numberPackItemSchema).min(1, { message: 'At least one number must be added to the pack.' }),
-  packPrice: z.preprocess(
-    (val) => {
-      if (typeof val === 'string' && val.trim() !== '') return parseFloat(val.replace(/,/g, ''));
-      if (typeof val === 'number') return val;
-      return undefined;
-    },
-    z.number({ required_error: "Pack price is required.", invalid_type_error: "Pack price must be a number." }).min(0, { message: 'Pack price must be positive.' })
-  ),
-  totalOriginalPrice: z.preprocess(
+  // packPrice is removed
+  totalOriginalPrice: z.preprocess( // This will be auto-calculated, but schema allows it to be set
     (val) => {
       if (typeof val === 'string' && val.trim() !== '') return parseFloat(val.replace(/,/g, ''));
       if (typeof val === 'number') return val;
@@ -102,7 +95,7 @@ export const numberPackSchema = z.object({
     },
     z.number({ invalid_type_error: "Total original price must be a number." }).min(0).optional().nullable()
   ),
-  status: z.enum(['available', 'sold'], { required_error: 'Status is required.' }),
+  status: z.enum(['available', 'sold', 'partially-sold'], { required_error: 'Status is required.' }),
   categorySlug: z.string().min(1, { message: 'Category Slug is required.' }),
   description: z.string().optional(),
   imageHint: z.string().max(50, { message: "Image hint cannot exceed 50 characters." }).optional(),

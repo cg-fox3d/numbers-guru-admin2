@@ -1,16 +1,17 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { NumberPackForm } from '@/components/products/forms/NumberPackForm';
-import type { NumberPack, NumberPackFormData } from '@/types';
+import type { NumberPack, NumberPackFormData, Category } from '@/types';
 import { numberPackSchema } from '@/lib/schemas';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, doc, updateDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, serverTimestamp, Timestamp, query, where, getDocs, orderBy } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
+import { Skeleton } from '@/components/ui/skeleton';
 
 interface NumberPackDialogProps {
   isOpen: boolean;
@@ -22,66 +23,91 @@ interface NumberPackDialogProps {
 export function NumberPackDialog({ isOpen, onClose, numberPack, onSuccess }: NumberPackDialogProps) {
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [isLoadingCategories, setIsLoadingCategories] = useState(false);
+
+  const defaultFormValues: NumberPackFormData = {
+    name: '',
+    numbers: [{ number: '', price: 0 }],
+    totalOriginalPrice: 0, // Will be auto-calculated
+    status: 'available',
+    categorySlug: '',
+    description: '',
+    imageHint: '',
+    isVipPack: false,
+  };
   
   const form = useForm<NumberPackFormData>({
     resolver: zodResolver(numberPackSchema),
-    defaultValues: {
-      name: '',
-      numbers: [{ number: '', price: 0 }], // Start with one empty number item
-      packPrice: 0,
-      totalOriginalPrice: null,
-      status: 'available',
-      categorySlug: '',
-      description: '',
-      imageHint: '',
-      isVipPack: false,
-    },
+    defaultValues: defaultFormValues,
   });
+
+  const fetchCategories = useCallback(async () => {
+    setIsLoadingCategories(true);
+    try {
+      const q = query(collection(db, 'categories'), where('type', '==', 'pack'), orderBy('order', 'asc'));
+      const querySnapshot = await getDocs(q);
+      const fetchedCategories: Category[] = [];
+      querySnapshot.forEach((doc) => {
+        fetchedCategories.push({ id: doc.id, ...doc.data() } as Category);
+      });
+      setCategories(fetchedCategories);
+      if (fetchedCategories.length > 0 && !numberPack && !form.getValues('categorySlug')) {
+        // Pre-select first category if adding new and no slug set
+        // form.setValue('categorySlug', fetchedCategories[0].slug); 
+        // Decided against pre-selection to allow explicit user choice
+      }
+    } catch (error) {
+      console.error("Error fetching categories for Number Pack form: ", error);
+      toast({
+        title: "Error Fetching Categories",
+        description: (error as Error).message || "Could not load categories.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingCategories(false);
+    }
+  }, [toast, numberPack, form]);
 
   useEffect(() => {
     if (isOpen) {
+      fetchCategories();
       if (numberPack) {
         form.reset({
           name: numberPack.name,
-          // Ensure numbers array is correctly mapped, providing empty objects if undefined
-          numbers: numberPack.numbers?.map(n => ({ number: n.number, price: n.price, id: n.id })) || [{ number: '', price: 0 }],
-          packPrice: numberPack.packPrice,
-          totalOriginalPrice: numberPack.totalOriginalPrice ?? null,
+          numbers: numberPack.numbers?.map(n => ({ 
+            originalVipNumberId: n.originalVipNumberId, 
+            number: n.number, 
+            price: n.price 
+          })) || [{ number: '', price: 0 }],
+          totalOriginalPrice: numberPack.totalOriginalPrice ?? 0, // Will be recalculated by form
           status: numberPack.status,
-          categorySlug: numberPack.categorySlug,
+          categorySlug: numberPack.categorySlug || '',
           description: numberPack.description || '',
           imageHint: numberPack.imageHint || '',
           isVipPack: numberPack.isVipPack || false,
         });
       } else {
-        form.reset({
-          name: '',
-          numbers: [{ number: '', price: 0 }],
-          packPrice: 0,
-          totalOriginalPrice: null,
-          status: 'available',
-          categorySlug: '',
-          description: '',
-          imageHint: '',
-          isVipPack: false,
-        });
+        form.reset(defaultFormValues);
       }
     }
-  }, [numberPack, form, isOpen]);
+  }, [numberPack, form, isOpen, fetchCategories, defaultFormValues]);
 
 
   const handleFormSubmit = async (data: NumberPackFormData) => {
     setIsSubmitting(true);
     
+    // totalOriginalPrice is now auto-calculated and set by the form's useEffect
+    // Ensure numbers have numeric prices
+    const processedNumbers = data.numbers.map(n => ({
+      ...n,
+      price: Number(n.price),
+    }));
+
     const dataToSave = {
       ...data,
-      packPrice: Number(data.packPrice),
-      totalOriginalPrice: data.totalOriginalPrice !== null && data.totalOriginalPrice !== undefined ? Number(data.totalOriginalPrice) : undefined,
-      numbers: data.numbers.map(n => ({
-        number: n.number,
-        price: Number(n.price),
-        // id: n.id // Persist id if needed for linking, otherwise it's mainly for form key
-      })),
+      numbers: processedNumbers,
+      totalOriginalPrice: Number(data.totalOriginalPrice) || 0, // Ensure it's a number
       updatedAt: serverTimestamp() as Timestamp,
     };
     
@@ -137,21 +163,29 @@ export function NumberPackDialog({ isOpen, onClose, numberPack, onSuccess }: Num
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="sm:max-w-3xl"> {/* Increased width for pack form */}
+      <DialogContent className="sm:max-w-3xl"> 
         <DialogHeader>
           <DialogTitle>{numberPack ? 'Edit Number Pack' : 'Add New Number Pack'}</DialogTitle>
           <DialogDescription>
             {numberPack ? 'Update the details of this number pack.' : 'Fill in the details for the new number pack.'}
           </DialogDescription>
         </DialogHeader>
-        <NumberPackForm
-          form={form}
-          onSubmit={handleFormSubmit}
-          isSubmitting={isSubmitting}
-          onClose={onClose}
-        />
+        {isLoadingCategories ? (
+          <div className="space-y-4 py-4">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-10 w-1/2" />
+          </div>
+        ) : (
+          <NumberPackForm
+            form={form}
+            onSubmit={handleFormSubmit}
+            isSubmitting={isSubmitting}
+            onClose={onClose}
+            categories={categories}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );
 }
-

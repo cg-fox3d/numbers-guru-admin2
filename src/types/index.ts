@@ -28,7 +28,7 @@ export interface VipNumber {
   imageHint?: string;
   isVip?: boolean;
   sumOfDigits?: string;
-  totalDigits?: string;
+  totalDigits?: string; // Sum of all digits
   createdAt?: Timestamp; 
   updatedAt?: Timestamp;
 }
@@ -36,8 +36,8 @@ export type VipNumberFormData = z.infer<typeof vipNumberSchema>;
 
 
 export interface NumberPackItem {
-  id?: string; // For react-hook-form key
-  originalVipNumberId?: string; // ID of the VIP number if selected from collection
+  id?: string; 
+  originalVipNumberId?: string; 
   number: string;
   price: number; 
 }
@@ -47,9 +47,9 @@ export interface NumberPack {
   id: string; 
   name: string; 
   numbers: NumberPackItem[]; 
-  packPrice: number; 
+  // packPrice removed
   totalOriginalPrice?: number | null; 
-  status: 'available' | 'sold'; 
+  status: 'available' | 'sold' | 'partially-sold'; 
   categorySlug: string;
   description?: string;
   imageHint?: string;
@@ -60,7 +60,7 @@ export interface NumberPack {
 export type NumberPackFormData = z.infer<typeof numberPackSchema>;
 
 
-export interface Customer { // This type might be for a different context, keeping it for now.
+export interface Customer { 
   id: string;
   name: string;
   email: string;
@@ -70,10 +70,10 @@ export interface Customer { // This type might be for a different context, keepi
 }
 
 export interface AdminDisplayCustomer {
-  id: string; // Firestore document ID (should be user's UID from Auth)
+  id: string; 
   email: string;
-  name?: string; // or displayName
-  createdAt: Timestamp; // Represents registration time or when user doc was created
+  name?: string; 
+  createdAt: Timestamp; 
 }
 
 export interface AdminOrder {
@@ -92,4 +92,3 @@ export interface DashboardStats {
   ordersThisMonth: number;
   productsInStock: number;
 }
-
