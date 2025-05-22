@@ -32,7 +32,7 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
     originalPrice: null,
     discount: null,
     status: 'available',
-    categorySlug: '',
+    categorySlug: '', // Ensure this defaults to an empty string
     description: '',
     imageHint: '',
     isVip: false,
@@ -55,10 +55,7 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
         fetchedCategories.push({ id: doc.id, ...doc.data() } as Category);
       });
       setCategories(fetchedCategories);
-      if (fetchedCategories.length > 0 && !vipNumber && !form.getValues('categorySlug')) {
-        // Pre-select first category if adding new and no categorySlug is set
-        // form.setValue('categorySlug', fetchedCategories[0].slug);
-      }
+      // No pre-selection logic here, form default or existing value will be used.
     } catch (error) {
       console.error("Error fetching categories for VIP Number form: ", error);
       toast({
@@ -69,7 +66,7 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
     } finally {
       setIsLoadingCategories(false);
     }
-  }, [toast, vipNumber, form]);
+  }, [toast]);
 
 
   useEffect(() => {
@@ -82,7 +79,7 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
           originalPrice: vipNumber.originalPrice ?? null,
           discount: vipNumber.discount ?? null,
           status: vipNumber.status,
-          categorySlug: vipNumber.categorySlug,
+          categorySlug: vipNumber.categorySlug || '', // Ensure empty string if null/undefined
           description: vipNumber.description || '',
           imageHint: vipNumber.imageHint || '',
           isVip: vipNumber.isVip || false,
@@ -116,7 +113,8 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
       let q;
 
       if (vipNumber && vipNumber.id) { // Editing existing number
-        if (processedNumber !== (vipNumber.number || '').trim()) { // Only check if number string actually changed
+        // Only check if number string actually changed
+        if (processedNumber !== (vipNumber.number || '').trim()) { 
           q = query(vipNumbersRef, where('number', '==', processedNumber));
           const querySnapshot = await getDocs(q);
           let isActualDuplicate = false;
@@ -189,15 +187,15 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
     try {
       if (vipNumber && vipNumber.id) {
         const vipNumberRef = doc(db, 'vipNumbers', vipNumber.id);
-        await updateDoc(vipNumberRef, dataToSave as any); // Cast to any to avoid type issues with partial update
+        await updateDoc(vipNumberRef, dataToSave as any); 
         toast({
           title: 'VIP Number Updated',
           description: `VIP Number "${processedNumber}" has been successfully updated.`,
         });
       } else {
         const dataForAdd = { ...dataToSave, createdAt: serverTimestamp() as Timestamp };
-        delete dataForAdd.updatedAt; // Remove updatedAt for new documents as createdAt covers it
-        await addDoc(collection(db, 'vipNumbers'), dataForAdd as any); // Cast to any
+        delete (dataForAdd as any).updatedAt; 
+        await addDoc(collection(db, 'vipNumbers'), dataForAdd as any); 
         toast({
           title: 'VIP Number Added',
           description: `VIP Number "${processedNumber}" has been successfully added.`,
@@ -247,3 +245,4 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
     </Dialog>
   );
 }
+

@@ -27,6 +27,8 @@ const calculateNumerologySum = (numberStr: string): string => {
 
   let sum = digits.split('').reduce((acc, digit) => acc + parseInt(digit, 10), 0);
 
+  // Reduce sum to a single digit (1-9)
+  // Keep reducing if sum is greater than 9
   while (sum > 9) {
     sum = sum.toString().split('').reduce((acc, digit) => acc + parseInt(digit, 10), 0);
   }
@@ -43,9 +45,11 @@ const calculateTotalDigits = (numberStr: string): string => {
 export function VipNumberForm({ form, onSubmit, isSubmitting, onClose, categories }: VipNumberFormProps) {
   const { watch, setValue, getValues } = form;
   const numberInput = watch('number');
+  const originalPriceInput = watch('originalPrice');
+  const discountInput = watch('discount');
 
   useEffect(() => {
-    if (numberInput !== undefined) {
+    if (numberInput !== undefined) { // Check if numberInput is defined to avoid issues on initial render
       const total = calculateTotalDigits(numberInput);
       const sum = calculateNumerologySum(numberInput);
       setValue('totalDigits', total, { shouldValidate: false });
@@ -54,23 +58,29 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose, categorie
   }, [numberInput, setValue]);
 
   const handleCalculatePrice = () => {
-    const originalPriceStr = String(getValues('originalPrice') || '0');
-    const discountStr = String(getValues('discount') || '0');
+    const originalPriceValue = getValues('originalPrice');
+    const discountValue = getValues('discount');
 
-    const op = parseFloat(originalPriceStr);
-    const d = parseFloat(discountStr);
+    const op = typeof originalPriceValue === 'number' ? originalPriceValue : parseFloat(String(originalPriceValue) || '0');
+    const d = typeof discountValue === 'number' ? discountValue : parseFloat(String(discountValue) || '0');
+
 
     if (!isNaN(op)) {
       if (!isNaN(d) && d >= 0 && d <= 100) {
         const calculatedPrice = op - (op * d / 100);
         setValue('price', Math.round(calculatedPrice), { shouldValidate: true });
       } else {
+        // If discount is invalid or not provided, selling price is original price
         setValue('price', Math.round(op), { shouldValidate: true });
       }
     } else {
+       // If original price is not a valid number, set selling price to 0 or handle as error
        setValue('price', 0, { shouldValidate: true });
     }
   };
+  
+  // Filter categories to ensure slugs are not empty strings
+  const validCategories = categories.filter(category => category.slug && category.slug.trim() !== '');
 
   return (
     <Form {...form}>
@@ -102,7 +112,10 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose, categorie
                     placeholder="e.g., 60000"
                     {...field}
                     onChange={e => field.onChange(e.target.value === '' ? null : parseFloat(e.target.value))}
-                    onBlur={handleCalculatePrice}
+                    onBlur={(e) => {
+                        field.onBlur(); // Call original onBlur
+                        handleCalculatePrice(); // Then calculate price
+                    }}
                     value={field.value ?? ''}
                   />
                 </FormControl>
@@ -123,7 +136,10 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose, categorie
                     step="0.01"
                     {...field}
                     onChange={e => field.onChange(e.target.value === '' ? null : parseFloat(e.target.value))}
-                    onBlur={handleCalculatePrice}
+                    onBlur={(e) => {
+                        field.onBlur(); // Call original onBlur
+                        handleCalculatePrice(); // Then calculate price
+                    }}
                     min="0"
                     max="100"
                     value={field.value ?? ''}
@@ -163,15 +179,19 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose, categorie
           render={({ field }) => (
             <FormItem>
               <FormLabel>Category</FormLabel>
-              <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
+              <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value || ""}>
                 <FormControl>
                   <SelectTrigger>
                     <SelectValue placeholder="Select a category" />
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent>
-                  {categories.length === 0 && <SelectItem value="" disabled>No 'individual' type categories found</SelectItem>}
-                  {categories.map((category) => (
+                  {validCategories.length === 0 && (
+                    <SelectItem value="placeholder-disabled" disabled>
+                      No 'individual' type categories found
+                    </SelectItem>
+                  )}
+                  {validCategories.map((category) => (
                     <SelectItem key={category.id} value={category.slug}>
                       {category.title} ({category.slug})
                     </SelectItem>
@@ -244,7 +264,7 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose, categorie
               <FormItem>
                 <FormLabel>Total Digits (Auto)</FormLabel>
                 <FormControl>
-                  <Input placeholder="Auto-calculated" {...field} readOnly />
+                  <Input placeholder="Auto-calculated" {...field} readOnly value={field.value ?? ''} />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -257,7 +277,7 @@ export function VipNumberForm({ form, onSubmit, isSubmitting, onClose, categorie
               <FormItem>
                 <FormLabel>Numerology Sum (Auto)</FormLabel>
                 <FormControl>
-                  <Input placeholder="Auto-calculated" {...field} readOnly />
+                  <Input placeholder="Auto-calculated" {...field} readOnly value={field.value ?? ''} />
                 </FormControl>
                 <FormMessage />
               </FormItem>
