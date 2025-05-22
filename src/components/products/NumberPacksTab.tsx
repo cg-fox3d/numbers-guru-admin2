@@ -34,8 +34,7 @@ interface NumberPacksTabProps {
 const PAGE_SIZE = 10;
 
 export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
-  const [allNumberPacks, setAllNumberPacks] = useState<NumberPack[]>([]); // Stores all fetched packs for current view if no pagination
-  const [numberPacksOnPage, setNumberPacksOnPage] = useState<NumberPack[]>([]); // Packs for current page
+  const [numberPacksOnPage, setNumberPacksOnPage] = useState<NumberPack[]>([]); 
   const [filteredNumberPacks, setFilteredNumberPacks] = useState<NumberPack[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -49,8 +48,7 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
   const [pageStartCursors, setPageStartCursors] = useState<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
   const pageStartCursorsRef = useRef(pageStartCursors);
 
-  const [lastVisibleDoc, setLastVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
-  const [firstVisibleDoc, setFirstVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [lastFetchedDoc, setLastFetchedDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasNextPage, setHasNextPage] = useState(false);
 
   useEffect(() => {
@@ -69,26 +67,22 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
 
   const loadNumberPacks = useCallback(async (pageIdxToLoad: number, options: { isRefresh?: boolean } = {}) => {
     setIsLoading(true);
-    if (options.isRefresh) {
+    const isActualRefresh = options.isRefresh || pageIdxToLoad === 0;
+    if (isActualRefresh) {
       setSearchTerm('');
     }
 
     try {
       let queryCursor: QueryDocumentSnapshot<DocumentData> | null = null;
-      const currentCursors = pageStartCursorsRef.current; // Read from ref
+      const currentCursors = pageStartCursorsRef.current;
 
-      if (options.isRefresh || pageIdxToLoad === 0) {
+      if (isActualRefresh) {
         queryCursor = null;
-        if (options.isRefresh) {
-          setPageStartCursors([null]);
-        }
+         if (options.isRefresh) setPageStartCursors([null]);
       } else if (pageIdxToLoad > 0 && pageIdxToLoad < currentCursors.length) {
         queryCursor = currentCursors[pageIdxToLoad];
-      } else if (pageIdxToLoad > 0 && lastVisibleDoc && pageIdxToLoad === currentCursors.length) {
-        queryCursor = lastVisibleDoc; // Use state variable directly here for "next" logic
-      } else {
-        console.warn("NumberPacksTab: Attempting to load page without a valid cursor strategy", { pageIdxToLoad, currentCursorsLength: currentCursors.length });
-        queryCursor = (pageIdxToLoad > currentCursors.length -1 && lastVisibleDoc) ? lastVisibleDoc : null;
+      } else if (pageIdxToLoad > 0 && lastFetchedDoc && pageIdxToLoad === currentCursors.length) {
+        queryCursor = lastFetchedDoc; 
       }
 
       const packsQuery = buildPageQuery(queryCursor);
@@ -101,22 +95,19 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
 
       setNumberPacksOnPage(fetchedPacks);
 
-      const newFirstVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null;
-      setFirstVisibleDoc(newFirstVisibleDoc);
-
-      const newLastVisibleDoc = documentSnapshots.docs.length > PAGE_SIZE
+      const newLastFetchedDoc = documentSnapshots.docs.length > PAGE_SIZE
         ? documentSnapshots.docs[PAGE_SIZE - 1]
         : (documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length -1] : null);
-      setLastVisibleDoc(newLastVisibleDoc);
+      setLastFetchedDoc(newLastFetchedDoc);
 
       const newHasNextPage = documentSnapshots.docs.length > PAGE_SIZE;
       setHasNextPage(newHasNextPage);
       
-      if (options.isRefresh || pageIdxToLoad === 0) {
-        setPageStartCursors(newFirstVisibleDoc ? [null, newFirstVisibleDoc] : [null]);
-      } else if (pageIdxToLoad >= currentCursors.length && newFirstVisibleDoc) {
-        // Navigated to a new "next" page
-        setPageStartCursors(prev => [...prev, newFirstVisibleDoc]);
+      if (isActualRefresh) {
+         const firstDocOfPage0 = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null;
+         setPageStartCursors(firstDocOfPage0 ? [null, firstDocOfPage0] : [null]);
+      } else if (pageIdxToLoad >= currentCursors.length && documentSnapshots.docs.length > 0 && queryCursor === lastFetchedDoc) {
+        setPageStartCursors(prev => [...prev, documentSnapshots.docs[0]]);
       }
     } catch (error) {
       console.error("Error fetching number packs: ", error);
@@ -136,17 +127,14 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
     setIsLoading, 
     setNumberPacksOnPage, 
     setHasNextPage, 
-    setLastVisibleDoc, 
+    setLastFetchedDoc, 
     setSearchTerm, 
-    setPageStartCursors, 
-    setFirstVisibleDoc
-    // Removed lastVisibleDoc from dependencies to break potential loops
+    setPageStartCursors
   ]);
 
   useEffect(() => {
-    // Refresh if on page 0, otherwise just load the current page.
-    // The `loadNumberPacks` function itself will handle full cursor reset if options.isRefresh is true.
-    loadNumberPacks(currentPageIndex, {isRefresh: currentPageIndex === 0 });
+    const isRefreshForEffect = currentPageIndex === 0 && pageStartCursorsRef.current.length <=1;
+    loadNumberPacks(currentPageIndex, {isRefresh: isRefreshForEffect });
   }, [currentPageIndex, loadNumberPacks]);
 
   useEffect(() => {
@@ -154,7 +142,8 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
       setFilteredNumberPacks(numberPacksOnPage);
     } else {
       const lowercasedFilter = searchTerm.toLowerCase();
-      const filteredData = (numberPacksOnPage || []).filter(item =>
+      const currentNumberPacks = numberPacksOnPage || [];
+      const filteredData = currentNumberPacks.filter(item =>
         item.name.toLowerCase().includes(lowercasedFilter)
       );
       setFilteredNumberPacks(filteredData);
@@ -192,7 +181,7 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
       if (isLastItemOnPage && currentPageIndex > 0) {
         setCurrentPageIndex(prev => prev -1); 
       } else {
-        loadNumberPacks(isLastItemOnPage && currentPageIndex === 0 ? 0 : currentPageIndex, { isRefresh: true });
+        loadNumberPacks(currentPageIndex, { isRefresh: true });
       }
     } catch (error) {
       console.error("Error deleting number pack: ", error);
@@ -210,6 +199,11 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
   const onDialogSuccess = useCallback(() => {
     loadNumberPacks(currentPageIndex, {isRefresh: true}); 
   }, [loadNumberPacks, currentPageIndex]);
+
+  const handleDialogClose = useCallback(() => {
+    setIsDialogOpen(false);
+    setEditingNumberPack(null);
+  }, []);
   
   const handleRefresh = useCallback(() => {
     if (currentPageIndex === 0) {
@@ -354,7 +348,7 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
         )}
       </CardContent>
 
-      {(filteredNumberPacks || []).length > 0 && (
+      {(filteredNumberPacks || []).length > 0 && !isLoading && (
         <CardFooter className="flex items-center justify-between p-4 border-t">
           <span className="text-sm text-muted-foreground">
             Page {currentPageIndex + 1}
@@ -383,10 +377,7 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
       {isDialogOpen && (
         <NumberPackDialog
             isOpen={isDialogOpen}
-            onClose={() => {
-                setIsDialogOpen(false);
-                setEditingNumberPack(null);
-            }}
+            onClose={handleDialogClose}
             numberPack={editingNumberPack}
             onSuccess={onDialogSuccess}
         />
@@ -416,4 +407,3 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
     </Card>
   );
 }
-

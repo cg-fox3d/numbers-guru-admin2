@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, query, orderBy, Timestamp, doc, deleteDoc, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
 import type { VipNumber } from '@/types';
@@ -46,22 +46,21 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
 
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [pageStartCursors, setPageStartCursors] = useState<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
-  const [lastVisibleDoc, setLastVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
-  const [firstVisibleDoc, setFirstVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const pageStartCursorsRef = useRef(pageStartCursors);
+
+  const [lastFetchedDoc, setLastFetchedDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasNextPage, setHasNextPage] = useState(false);
 
-  const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null, direction: 'next' | 'prev' | 'current' = 'next') => {
+  useEffect(() => {
+    pageStartCursorsRef.current = pageStartCursors;
+  }, [pageStartCursors]);
+
+  const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null) => {
     let q = query(collection(db, 'vipNumbers'), orderBy('createdAt', 'desc'));
 
     if (cursor) {
-      if (direction === 'next') {
-        q = query(q, startAfter(cursor), limit(PAGE_SIZE + 1));
-      } else if (direction === 'prev') {
-        // For 'prev', cursor is the start of the target previous page.
-        q = query(q, startAfter(cursor), limit(PAGE_SIZE + 1));
-      }
+      q = query(q, startAfter(cursor), limit(PAGE_SIZE + 1));
     } else {
-      // First page or refresh
       q = query(q, limit(PAGE_SIZE + 1));
     }
     return q;
@@ -69,22 +68,25 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
 
   const loadVipNumbers = useCallback(async (pageIdxToLoad: number, options: { isRefresh?: boolean } = {}) => {
     setIsLoading(true);
-    if (options.isRefresh) {
+    const isActualRefresh = options.isRefresh || pageIdxToLoad === 0;
+    if (isActualRefresh) {
       setSearchTerm('');
     }
 
     try {
       let queryCursor: QueryDocumentSnapshot<DocumentData> | null = null;
+      const currentCursors = pageStartCursorsRef.current;
 
-      if (options.isRefresh || pageIdxToLoad === 0) {
+      if (isActualRefresh) {
         queryCursor = null;
-      } else if (pageIdxToLoad > 0 && pageIdxToLoad < pageStartCursors.length) {
-        queryCursor = pageStartCursors[pageIdxToLoad];
-      } else if (pageIdxToLoad > 0 && lastVisibleDoc && pageIdxToLoad === pageStartCursors.length) {
-        queryCursor = lastVisibleDoc;
+        if (options.isRefresh) setPageStartCursors([null]);
+      } else if (pageIdxToLoad > 0 && pageIdxToLoad < currentCursors.length) {
+        queryCursor = currentCursors[pageIdxToLoad];
+      } else if (pageIdxToLoad > 0 && lastFetchedDoc && pageIdxToLoad === currentCursors.length) {
+        queryCursor = lastFetchedDoc;
       }
       
-      const vipNumbersQuery = buildPageQuery(queryCursor, options.isRefresh || pageIdxToLoad === 0 ? 'current' : (pageIdxToLoad > currentPageIndex ? 'next' : 'prev') );
+      const vipNumbersQuery = buildPageQuery(queryCursor);
       const documentSnapshots = await getDocs(vipNumbersQuery);
 
       const fetchedVipNumbers: VipNumber[] = [];
@@ -93,22 +95,20 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
       });
       
       setVipNumbersOnPage(fetchedVipNumbers);
-
-      const newFirstVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null;
-      setFirstVisibleDoc(newFirstVisibleDoc);
       
-      const newLastVisibleDoc = documentSnapshots.docs.length > PAGE_SIZE
+      const newLastFetchedDoc = documentSnapshots.docs.length > PAGE_SIZE
         ? documentSnapshots.docs[PAGE_SIZE - 1]
         : (documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null);
-      setLastVisibleDoc(newLastVisibleDoc);
+      setLastFetchedDoc(newLastFetchedDoc);
 
       const newHasNextPage = documentSnapshots.docs.length > PAGE_SIZE;
       setHasNextPage(newHasNextPage);
 
-      if (options.isRefresh || pageIdxToLoad === 0) {
-        setPageStartCursors([null, newFirstVisibleDoc].filter(c => c !== undefined) as (QueryDocumentSnapshot<DocumentData> | null)[]);
-      } else if (pageIdxToLoad >= pageStartCursors.length && newFirstVisibleDoc) {
-        setPageStartCursors(prev => [...prev, newFirstVisibleDoc]);
+      if (isActualRefresh) {
+         const firstDocOfPage0 = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null;
+         setPageStartCursors(firstDocOfPage0 ? [null, firstDocOfPage0] : [null]);
+      } else if (pageIdxToLoad >= currentCursors.length && documentSnapshots.docs.length > 0 && queryCursor === lastFetchedDoc) {
+        setPageStartCursors(prev => [...prev, documentSnapshots.docs[0]]);
       }
       
     } catch (error) {
@@ -123,10 +123,11 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [toast, buildPageQuery, currentPageIndex]); // currentPageIndex to re-evaluate cursor logic if direction depends on it.
+  }, [buildPageQuery, toast, setIsLoading, setVipNumbersOnPage, setHasNextPage, setLastFetchedDoc, setSearchTerm, setPageStartCursors]);
 
   useEffect(() => {
-    loadVipNumbers(currentPageIndex, {isRefresh: currentPageIndex === 0 && pageStartCursors.length <=1 });
+    const isRefreshForEffect = currentPageIndex === 0 && pageStartCursorsRef.current.length <=1;
+    loadVipNumbers(currentPageIndex, {isRefresh: isRefreshForEffect });
   }, [currentPageIndex, loadVipNumbers]);
 
   useEffect(() => {
@@ -134,7 +135,8 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
       setFilteredVipNumbers(vipNumbersOnPage);
     } else {
       const lowercasedFilter = searchTerm.toLowerCase();
-      const filteredData = (vipNumbersOnPage || []).filter(item =>
+      const currentVipNumbers = vipNumbersOnPage || [];
+      const filteredData = currentVipNumbers.filter(item =>
         item.number.toLowerCase().includes(lowercasedFilter)
       );
       setFilteredVipNumbers(filteredData);
@@ -168,7 +170,8 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
         title: 'VIP Number Deleted',
         description: `VIP Number "${vipNumberToDelete.number}" has been successfully deleted.`,
       });
-      if (vipNumbersOnPage.length === 1 && currentPageIndex > 0) {
+      const isLastItemOnPage = vipNumbersOnPage.length === 1;
+      if (isLastItemOnPage && currentPageIndex > 0) {
         setCurrentPageIndex(prev => prev -1);
       } else {
         loadVipNumbers(currentPageIndex, { isRefresh: true });
@@ -190,11 +193,16 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
     loadVipNumbers(currentPageIndex, { isRefresh: true });
   }, [loadVipNumbers, currentPageIndex]);
 
+  const handleDialogClose = useCallback(() => {
+    setIsDialogOpen(false);
+    setEditingVipNumber(null);
+  }, []);
+
   const handleRefresh = useCallback(() => {
     if (currentPageIndex === 0) {
         loadVipNumbers(0, { isRefresh: true });
     } else {
-        setCurrentPageIndex(0); // This will trigger useEffect to load page 0
+        setCurrentPageIndex(0); 
     }
   }, [loadVipNumbers, currentPageIndex]);
 
@@ -336,7 +344,7 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
         )}
       </CardContent>
 
-      {(vipNumbersOnPage || []).length > 0 && (
+      {(vipNumbersOnPage || []).length > 0 && !isLoading && (
         <CardFooter className="flex items-center justify-between p-4 border-t">
           <span className="text-sm text-muted-foreground">
             Page {currentPageIndex + 1}
@@ -365,10 +373,7 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
       {isDialogOpen && (
         <VipNumberDialog
           isOpen={isDialogOpen}
-          onClose={() => {
-            setIsDialogOpen(false);
-            setEditingVipNumber(null);
-          }}
+          onClose={handleDialogClose}
           vipNumber={editingVipNumber}
           onSuccess={onDialogSuccess}
         />

@@ -12,7 +12,7 @@ import { MoreHorizontal, Edit, Trash2, PlusCircle, FolderKanban, PackageSearch, 
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { db } from '@/lib/firebase';
-import { collection, query, orderBy, Timestamp, doc, deleteDoc, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData, endBefore, limitToLast } from 'firebase/firestore';
+import { collection, query, orderBy, Timestamp, doc, deleteDoc, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
 import type { Category } from '@/types';
 import { format } from 'date-fns';
 import { CategoryDialog } from '@/components/categories/CategoryDialog';
@@ -31,6 +31,7 @@ import {
 const PAGE_SIZE = 10;
 
 export default function CategoriesPage() {
+  const [allCategories, setAllCategories] = useState<Category[]>([]);
   const [categoriesOnPage, setCategoriesOnPage] = useState<Category[]>([]);
   const [filteredCategories, setFilteredCategories] = useState<Category[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -42,15 +43,11 @@ export default function CategoriesPage() {
   const [searchTerm, setSearchTerm] = useState('');
 
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
-  // pageStartCursors[i] stores the first document of page i.
-  // pageStartCursors[0] is null for the very first fetch.
   const [pageStartCursors, setPageStartCursors] = useState<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
-  const [lastVisibleDoc, setLastVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
-  const [firstVisibleDoc, setFirstVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [lastFetchedDoc, setLastFetchedDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasNextPage, setHasNextPage] = useState(false);
 
-
-  const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null, direction: 'next' | 'prev' | 'current' = 'next') => {
+  const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null) => {
     let q = query(
       collection(db, 'categories'),
       orderBy('order', 'asc'),
@@ -58,42 +55,31 @@ export default function CategoriesPage() {
     );
 
     if (cursor) {
-      if (direction === 'next') {
-        q = query(q, startAfter(cursor), limit(PAGE_SIZE + 1));
-      } else if (direction === 'prev') {
-        // Firestore doesn't directly support "previous page" with multiple orderBys and endBefore well.
-        // A common strategy is to reverse the query order, use endBefore, limit, then reverse results.
-        // For simplicity here, we are re-fetching from a known start cursor of the previous page.
-        // If cursor is not null (meaning not the first page), we use it for startAfter.
-        // This logic is handled in loadCategories' pageIdxToLoad.
-        // The cursor passed here for 'prev' would be the start of the *target* previous page.
-         q = query(q, startAfter(cursor), limit(PAGE_SIZE + 1));
-      }
+      q = query(q, startAfter(cursor), limit(PAGE_SIZE + 1));
     } else {
-       // First page or refresh
-       q = query(q, limit(PAGE_SIZE + 1));
+      q = query(q, limit(PAGE_SIZE + 1));
     }
     return q;
   }, []);
 
-
   const loadCategories = useCallback(async (pageIdxToLoad: number, options: { isRefresh?: boolean } = {}) => {
     setIsLoading(true);
-    setSearchTerm(''); // Reset search on page load/refresh
+    if (options.isRefresh) {
+      setSearchTerm('');
+    }
 
     try {
       let queryCursor: QueryDocumentSnapshot<DocumentData> | null = null;
-      
+
       if (options.isRefresh || pageIdxToLoad === 0) {
-        setPageStartCursors([null]); // Reset cursors for refresh or first page
         queryCursor = null;
+        if (options.isRefresh) setPageStartCursors([null]);
       } else if (pageIdxToLoad > 0 && pageIdxToLoad < pageStartCursors.length) {
         queryCursor = pageStartCursors[pageIdxToLoad];
-      } else if (pageIdxToLoad > 0 && lastVisibleDoc && pageIdxToLoad === pageStartCursors.length) { 
-        // Trying to go to a new next page
-        queryCursor = lastVisibleDoc;
+      } else if (pageIdxToLoad > 0 && lastFetchedDoc && pageIdxToLoad === pageStartCursors.length) {
+        // Trying to go to a new next page, so current lastFetchedDoc is the cursor
+        queryCursor = lastFetchedDoc;
       }
-
 
       const categoriesQuery = buildPageQuery(queryCursor);
       const documentSnapshots = await getDocs(categoriesQuery);
@@ -105,24 +91,21 @@ export default function CategoriesPage() {
       
       setCategoriesOnPage(fetchedCategories);
       
-      const newFirstVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null;
-      setFirstVisibleDoc(newFirstVisibleDoc);
-
-      const newLastVisibleDoc = documentSnapshots.docs.length > PAGE_SIZE 
+      const newLastFetchedDoc = documentSnapshots.docs.length > PAGE_SIZE 
         ? documentSnapshots.docs[PAGE_SIZE - 1] 
         : (documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null);
-      setLastVisibleDoc(newLastVisibleDoc);
+      setLastFetchedDoc(newLastFetchedDoc);
       
       const newHasNextPage = documentSnapshots.docs.length > PAGE_SIZE;
       setHasNextPage(newHasNextPage);
 
-      if (pageIdxToLoad >= pageStartCursors.length && newFirstVisibleDoc) {
-        // Add the first doc of the new page as the cursor for this page
-        setPageStartCursors(prev => [...prev, newFirstVisibleDoc]);
-      } else if (options.isRefresh || pageIdxToLoad === 0) {
-        setPageStartCursors([null, newFirstVisibleDoc].filter(c => c !== undefined) as (QueryDocumentSnapshot<DocumentData> | null)[]);
+      if (options.isRefresh || pageIdxToLoad === 0) {
+         const firstDocOfPage0 = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null;
+         setPageStartCursors(firstDocOfPage0 ? [null, firstDocOfPage0] : [null]);
+      } else if (pageIdxToLoad >= pageStartCursors.length && documentSnapshots.docs.length > 0 && queryCursor === lastFetchedDoc) {
+         // Add the first doc of the new page as the cursor for this page
+        setPageStartCursors(prev => [...prev, documentSnapshots.docs[0]]);
       }
-
 
     } catch (error) {
       console.error("Error fetching categories: ", error);
@@ -136,19 +119,19 @@ export default function CategoriesPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast, buildPageQuery]); // pageStartCursors removed to break potential loops
+  }, [toast, buildPageQuery, setIsLoading, setCategoriesOnPage, setHasNextPage, setLastFetchedDoc, setSearchTerm, setPageStartCursors]); 
 
   useEffect(() => {
-    loadCategories(currentPageIndex);
-  }, [currentPageIndex, loadCategories]); // loadCategories is memoized
+    loadCategories(currentPageIndex, {isRefresh: currentPageIndex === 0 && pageStartCursors.length <=1 });
+  }, [currentPageIndex, loadCategories]);
 
   useEffect(() => {
     if (searchTerm === '') {
       setFilteredCategories(categoriesOnPage);
     } else {
       const lowercasedFilter = searchTerm.toLowerCase();
-      // Client-side search on the current page's data
-      const filteredData = (categoriesOnPage || []).filter(category =>
+      const currentCategories = categoriesOnPage || [];
+      const filteredData = currentCategories.filter(category =>
         category.title.toLowerCase().includes(lowercasedFilter) ||
         category.slug.toLowerCase().includes(lowercasedFilter)
       );
@@ -183,11 +166,11 @@ export default function CategoriesPage() {
         title: 'Category Deleted',
         description: `Category "${categoryToDelete.title}" has been successfully deleted.`,
       });
-      // Check if the current page might become empty after delete
-      if (categoriesOnPage.length === 1 && currentPageIndex > 0) {
-        setCurrentPageIndex(prev => prev -1); // Go to previous page
+      const isLastItemOnPage = categoriesOnPage.length === 1;
+      if (isLastItemOnPage && currentPageIndex > 0) {
+        setCurrentPageIndex(prev => prev -1); 
       } else {
-        loadCategories(currentPageIndex, {isRefresh: true}); // Refresh current page
+        loadCategories(currentPageIndex, { isRefresh: true });
       }
     } catch (error) {
       console.error("Error deleting category: ", error);
@@ -203,9 +186,13 @@ export default function CategoriesPage() {
   };
   
   const onDialogSuccess = useCallback(() => {
-    // Refresh current page data after add/edit
     loadCategories(currentPageIndex, {isRefresh: true}); 
   }, [loadCategories, currentPageIndex]);
+
+  const handleDialogClose = useCallback(() => {
+    setIsDialogOpen(false);
+    setEditingCategory(null);
+  }, []);
 
   const handleRefresh = useCallback(() => {
     if (currentPageIndex === 0) {
@@ -266,7 +253,7 @@ export default function CategoriesPage() {
             A Firestore index on 'categories' for 'order' (ASC) then 'createdAt' (DESC) is required.
           </CardDescription>
         </CardHeader>
-        <CardContent className="p-0 min-h-[300px]"> {/* Added min-h for consistent loading view */}
+        <CardContent className="p-0 min-h-[300px]">
           {isLoading ? (
             <div className="p-6 space-y-2">
               {[...Array(5)].map((_, i) => ( 
@@ -351,7 +338,7 @@ export default function CategoriesPage() {
             </Table>
           )}
         </CardContent>
-        { (categoriesOnPage || []).length > 0 && (
+        { (categoriesOnPage || []).length > 0 && !isLoading && (
             <CardFooter className="flex items-center justify-between p-4 border-t">
                 <span className="text-sm text-muted-foreground">
                     Page {currentPageIndex + 1}
@@ -381,10 +368,7 @@ export default function CategoriesPage() {
       {isDialogOpen && (
         <CategoryDialog
           isOpen={isDialogOpen}
-          onClose={() => {
-            setIsDialogOpen(false);
-            setEditingCategory(null);
-          }}
+          onClose={handleDialogClose}
           category={editingCategory}
           onSuccess={onDialogSuccess}
         />
