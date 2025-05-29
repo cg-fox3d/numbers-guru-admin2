@@ -3,7 +3,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { PageHeader } from '@/components/common/PageHeader';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -71,45 +71,44 @@ export default function OrdersPage() {
   const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>({});
 
-  const buildBaseQuery = useCallback((currentFilters: ActiveFilters) => {
+  const buildBaseQuery = useCallback((currentActiveFilters: ActiveFilters, cursor: QueryDocumentSnapshot<DocumentData> | null = null) => {
     const constraints: QueryConstraint[] = [];
 
-    if (currentFilters.status) {
-      constraints.push(where('orderStatus', '==', currentFilters.status));
+    if (currentActiveFilters.status) {
+      constraints.push(where('orderStatus', '==', currentActiveFilters.status));
     }
-    if (currentFilters.dateFrom) {
-      constraints.push(where('orderDate', '>=', Timestamp.fromDate(currentFilters.dateFrom)));
+    if (currentActiveFilters.dateFrom) {
+      constraints.push(where('orderDate', '>=', Timestamp.fromDate(currentActiveFilters.dateFrom)));
     }
-    if (currentFilters.dateTo) {
-      const toDateEnd = new Date(currentFilters.dateTo);
+    if (currentActiveFilters.dateTo) {
+      const toDateEnd = new Date(currentActiveFilters.dateTo);
       toDateEnd.setHours(23, 59, 59, 999);
       constraints.push(where('orderDate', '<=', Timestamp.fromDate(toDateEnd)));
     }
     
     constraints.push(orderBy('orderDate', 'desc'));
+
+    if (cursor) {
+      constraints.push(startAfter(cursor));
+    }
+    constraints.push(limit(PAGE_SIZE));
+    
     return query(collection(db, 'orders'), ...constraints);
   }, []);
 
   const fetchOrders = useCallback(async (cursor: QueryDocumentSnapshot<DocumentData> | null = null, isRefreshOrFilterChange = false) => {
-    if (isLoading && !isRefreshOrFilterChange) return; 
+    if (isLoading) return; 
     
+    setIsLoading(true);
     if (isRefreshOrFilterChange) {
       setIsInitialLoading(true);
       setAllOrders([]); 
       setLastVisibleDoc(null);
       setHasMore(true);
-      // setSearchTerm(''); // Keep search term on filter change unless explicit refresh
     }
-    setIsLoading(true);
 
     try {
-      let ordersQuery = buildBaseQuery(activeFilters);
-      if(cursor) {
-        ordersQuery = query(ordersQuery, startAfter(cursor), limit(PAGE_SIZE));
-      } else {
-        ordersQuery = query(ordersQuery, limit(PAGE_SIZE));
-      }
-      
+      const ordersQuery = buildBaseQuery(activeFilters, cursor);
       const documentSnapshots = await getDocs(ordersQuery);
       
       let fetchedOrders: AdminOrder[] = [];
@@ -140,7 +139,7 @@ export default function OrdersPage() {
         description: (error as Error).message || 'Could not load orders. Check console for details & ensure Firestore indexes are set up for current filters.',
         variant: 'destructive',
       });
-      setHasMore(false);
+      setHasMore(false); // Stop trying to load more if there's an error
     } finally {
       setIsLoading(false);
       if (isRefreshOrFilterChange) setIsInitialLoading(false);
@@ -149,13 +148,15 @@ export default function OrdersPage() {
 
 
   useEffect(() => {
+    // This effect handles initial load and re-fetching when filters change
     fetchOrders(null, true); 
-  }, [activeFilters, fetchOrders]);
+  }, [activeFilters, fetchOrders]); // fetchOrders is memoized, so this runs when activeFilters changes
 
   useEffect(() => {
+    // Intersection Observer for infinite scrolling
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !isLoading && !isInitialLoading && lastVisibleDoc) {
+        if (entries[0].isIntersecting && hasMore && !isLoading && !isInitialLoading) {
           fetchOrders(lastVisibleDoc);
         }
       },
@@ -175,6 +176,7 @@ export default function OrdersPage() {
   }, [hasMore, isLoading, isInitialLoading, lastVisibleDoc, fetchOrders]);
 
   useEffect(() => {
+    // Client-side search filtering
     const lowercasedSearch = searchTerm.toLowerCase();
     if (searchTerm === '') {
       setFilteredOrders(allOrders);
@@ -190,8 +192,11 @@ export default function OrdersPage() {
 
   const handleRefresh = useCallback(() => {
     setSearchTerm(''); 
-    // activeFilters remain, fetchOrders with isRefreshOrFilterChange=true will reset list
-    fetchOrders(null, true); 
+    // fetchOrders(null, true) will be triggered by the activeFilters useEffect if needed,
+    // or we can explicitly call it to ensure a fresh load from page 0 based on current filters.
+    // For simplicity, we'll rely on the activeFilters useEffect, but if filters are empty,
+    // this might not re-trigger. So, an explicit call is safer.
+    fetchOrders(null, true);
   }, [fetchOrders, setSearchTerm]);
 
   const openDetailsDialog = useCallback((order: AdminOrder) => {
@@ -216,7 +221,10 @@ export default function OrdersPage() {
         title: 'Status Updated',
         description: `Order ${orderId} marked as delivered.`,
       });
-      setAllOrders(prev => prev.map(o => o.id === orderId ? {...o, orderStatus: 'delivered', updatedAt: Timestamp.now()} : o));
+      // Optimistically update local state
+      setAllOrders(prevOrders => prevOrders.map(o => 
+        o.id === orderId ? {...o, orderStatus: 'delivered', updatedAt: Timestamp.now()} : o
+      ));
     } catch (error) {
       console.error("Error updating order status: ", error);
       toast({
@@ -246,7 +254,8 @@ export default function OrdersPage() {
         title: 'Order Deleted',
         description: `Order "${orderToModify.orderId}" has been successfully deleted.`,
       });
-      setAllOrders(prev => prev.filter(o => o.id !== orderToModify.id));
+      // Optimistically update local state
+      setAllOrders(prevOrders => prevOrders.filter(o => o.id !== orderToModify.id));
     } catch (error) {
       console.error("Error deleting order: ", error);
       toast({
@@ -300,6 +309,10 @@ export default function OrdersPage() {
 
   const displayOrders = searchTerm ? filteredOrders : allOrders;
 
+  const getActiveFilterCount = () => {
+    return Object.values(activeFilters).filter(v => v !== undefined && v !== '' && (Array.isArray(v) ? v.length > 0 : true)).length;
+  }
+
   return (
     <>
       <PageHeader
@@ -311,7 +324,7 @@ export default function OrdersPage() {
               <PopoverTrigger asChild>
                 <Button variant="outline" disabled={isInitialLoading || isLoading || isModifyLoading}>
                   <FilterIcon className="mr-2 h-4 w-4" />
-                  Filters {Object.values(activeFilters).filter(v => v !== undefined && v !== '' && (Array.isArray(v) ? v.length > 0 : true)).length > 0 && `(${Object.values(activeFilters).filter(v => v !== undefined && v !== '' && (Array.isArray(v) ? v.length > 0 : true) ).length})`}
+                  Filters {getActiveFilterCount() > 0 && `(${getActiveFilterCount()})`}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-80" align="end">
@@ -356,8 +369,11 @@ export default function OrdersPage() {
                     <div>
                       <Label htmlFor="status">Order Status</Label>
                       <Select value={filterStatus} onValueChange={setFilterStatus}>
-                        <SelectTrigger id="status"><SelectValue placeholder="All Statuses" /></SelectTrigger>
+                        <SelectTrigger id="status">
+                            <SelectValue placeholder="All Statuses" />
+                        </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="">All Statuses</SelectItem>
                           {ORDER_STATUSES.map(status => (
                             <SelectItem key={status} value={status} className="capitalize">{status}</SelectItem>
                           ))}
@@ -411,12 +427,12 @@ export default function OrdersPage() {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 w-full md:w-1/2 lg:w-1/3"
-              disabled={isInitialLoading && allOrders.length === 0}
+              disabled={isInitialLoading && allOrders.length === 0 && !Object.values(activeFilters).some(Boolean)}
             />
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <ScrollArea className="h-[60vh]"> {/* Adjust height as needed */}
+          <ScrollArea className="h-[60vh]"> {/* Ensure height is set for ScrollArea */}
             {isInitialLoading ? (
               <Table>
                 <TableHeader>
@@ -436,12 +452,12 @@ export default function OrdersPage() {
               <div className="flex flex-col items-center justify-center text-center p-10 min-h-[300px]">
                 <PackageSearch className="h-12 w-12 text-muted-foreground mb-4" />
                 <h3 className="text-xl font-semibold">
-                  {searchTerm || Object.values(activeFilters).some(v => v !== undefined && v !== '' && (Array.isArray(v) ? v.length > 0 : true)) ? 'No Orders Match Your Search/Filters' : 'No Orders Found'}
+                  {searchTerm || getActiveFilterCount() > 0 ? 'No Orders Match Your Search/Filters' : 'No Orders Found'}
                 </h3>
                 <p className="text-muted-foreground">
-                  {searchTerm || Object.values(activeFilters).some(v => v !== undefined && v !== '' && (Array.isArray(v) ? v.length > 0 : true)) ? 'Try different criteria or clear search/filters.' : "The 'orders' collection might be empty or there was an issue fetching data (check console for index errors)."}
+                  {searchTerm || getActiveFilterCount() > 0 ? 'Try different criteria or clear search/filters.' : "The 'orders' collection might be empty or there was an issue fetching data (check console for index errors)."}
                 </p>
-                {(searchTerm || Object.values(activeFilters).some(v => v !== undefined && v !== '' && (Array.isArray(v) ? v.length > 0 : true))) && (
+                {(searchTerm || getActiveFilterCount() > 0) && (
                     <Button onClick={() => { setSearchTerm(''); handleClearFilters(); }} variant="outline" className="mt-4">Clear Search & Filters</Button>
                 )}
               </div>
@@ -495,7 +511,7 @@ export default function OrdersPage() {
             )}
             <div ref={loadMoreRef} className="h-10 flex items-center justify-center">
               {isLoading && !isInitialLoading && <p className="text-muted-foreground">Loading more orders...</p>}
-              {!isLoading && !hasMore && displayOrders.length > 0 && <p className="text-muted-foreground">No more orders to load.</p>}
+              {!isLoading && !isInitialLoading && !hasMore && displayOrders.length > 0 && <p className="text-muted-foreground">No more orders to load.</p>}
             </div>
           </ScrollArea>
         </CardContent>
@@ -505,8 +521,8 @@ export default function OrdersPage() {
         <OrderDetailsDialog isOpen={isDetailsDialogOpen} onClose={closeDetailsDialog} order={selectedOrderForDetails} />
       )}
 
-      {orderToModify && (
-        <AlertDialog open={!!orderToModify && !selectedOrderForDetails} onOpenChange={(open) => !open && closeDeleteConfirmDialog()}>
+      {orderToModify && !isDetailsDialogOpen && ( // Ensure delete dialog doesn't open if details dialog is open
+        <AlertDialog open={!!orderToModify} onOpenChange={(open) => !open && closeDeleteConfirmDialog()}>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
