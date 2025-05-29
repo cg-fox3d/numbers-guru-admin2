@@ -3,7 +3,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { PageHeader } from '@/components/common/PageHeader';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Users, MoreHorizontal, Search as SearchIcon, PackageSearch, RefreshCcw } from 'lucide-react';
@@ -22,7 +22,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
-const PAGE_SIZE = 10; // Number of items to fetch per batch
+const PAGE_SIZE = 10;
 
 export default function CustomersPage() {
   const [allCustomers, setAllCustomers] = useState<AdminDisplayCustomer[]>([]);
@@ -42,11 +42,13 @@ export default function CustomersPage() {
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null): QueryConstraint[] => {
+    console.log("[CustomersPage] buildPageQuery: Called with cursor:", cursor ? cursor.id : null);
     const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')];
     if (cursor) {
       constraints.push(startAfter(cursor));
     }
     constraints.push(limit(PAGE_SIZE));
+    console.log("[CustomersPage] buildPageQuery: Constraints:", constraints);
     return constraints;
   }, []);
 
@@ -54,44 +56,55 @@ export default function CustomersPage() {
     cursor: QueryDocumentSnapshot<DocumentData> | null = null,
     isRefresh = false
   ) => {
-    if (isLoading) return;
+    console.log(`[CustomersPage] loadCustomers: Called. Cursor: ${cursor ? cursor.id : 'null'}, isRefresh: ${isRefresh}, isLoading: ${isLoading}`);
+    if (isLoading && !isRefresh) { // Allow refresh even if loading, but not concurrent loads
+      console.log("[CustomersPage] loadCustomers: Already loading and not a refresh, returning.");
+      return;
+    }
 
     setIsLoading(true);
     if (isRefresh) {
+      console.log("[CustomersPage] loadCustomers: Refresh triggered. Setting isInitialLoading=true.");
       setIsInitialLoading(true);
+      setAllCustomers([]);
+      setLastVisibleDoc(null);
+      setFirstVisibleDoc(null);
+      setHasMore(true); 
       setSearchTerm(''); 
     }
 
     try {
-      if (isRefresh) {
-        setAllCustomers([]);
-        setLastVisibleDoc(null);
-        setFirstVisibleDoc(null);
-        setHasMore(true); 
-      }
-
       const queryConstraints = buildPageQuery(cursor);
       const customersQuery = query(collection(db, 'users'), ...queryConstraints);
+      console.log("[CustomersPage] loadCustomers: Executing Firestore query...");
       
       const documentSnapshots = await getDocs(customersQuery);
       const fetchedCustomersBatch: AdminDisplayCustomer[] = [];
+      console.log(`[CustomersPage] loadCustomers: Firestore query returned ${documentSnapshots.docs.length} documents.`);
+      
       documentSnapshots.docs.forEach((docSn) => {
         fetchedCustomersBatch.push({ id: docSn.id, ...docSn.data() } as AdminDisplayCustomer);
       });
 
-      if (isRefresh || !cursor) { // Initial load or refresh
+      if (isRefresh || !cursor) { 
         setAllCustomers(fetchedCustomersBatch);
         setFirstVisibleDoc(documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null);
-      } else { // Loading more
-        setAllCustomers(prevCustomers => [...prevCustomers, ...fetchedCustomersBatch]);
+        console.log("[CustomersPage] loadCustomers: Initial load/refresh. All customers set. First visible doc:", documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0].id : 'null');
+      } else { 
+        setAllCustomers(prevCustomers => {
+          const newCustomers = [...prevCustomers, ...fetchedCustomersBatch];
+          console.log(`[CustomersPage] loadCustomers: Appending customers. Prev count: ${prevCustomers.length}, New batch count: ${fetchedCustomersBatch.length}, Total: ${newCustomers.length}`);
+          return newCustomers;
+        });
       }
       
       const newLastVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null;
       setLastVisibleDoc(newLastVisibleDoc);
       setHasMore(documentSnapshots.docs.length === PAGE_SIZE);
+      console.log(`[CustomersPage] loadCustomers: Updated lastVisibleDoc: ${newLastVisibleDoc ? newLastVisibleDoc.id : 'null'}, hasMore: ${documentSnapshots.docs.length === PAGE_SIZE}`);
 
     } catch (error) {
-      console.error("Error fetching customers: ", error);
+      console.error("[CustomersPage] loadCustomers: Error fetching customers: ", error);
       toast({
         title: 'Error Fetching Customers',
         description: (error as Error).message || 'Could not load customer data. An index on \'users\' for \'createdAt\' (desc) might be required.',
@@ -102,24 +115,25 @@ export default function CustomersPage() {
       setIsLoading(false);
       if (isRefresh) {
         setIsInitialLoading(false);
+        console.log("[CustomersPage] loadCustomers: Refresh finished. isInitialLoading=false, isLoading=false.");
+      } else {
+        console.log("[CustomersPage] loadCustomers: Load more finished. isLoading=false.");
       }
     }
-  }, [toast, buildPageQuery, isLoading, setIsLoading, setIsInitialLoading, setAllCustomers, setLastVisibleDoc, setFirstVisibleDoc, setHasMore, setSearchTerm]);
+  }, [toast, buildPageQuery, setIsLoading, setIsInitialLoading, setAllCustomers, setLastVisibleDoc, setFirstVisibleDoc, setHasMore, setSearchTerm, isLoading]);
 
 
-  // Effect for initial load
   useEffect(() => {
-    loadCustomers(null, true);
-  }, [loadCustomers]);
+    console.log("[CustomersPage] Initial useEffect: Triggering loadCustomers for initial load/refresh.");
+    loadCustomers(null, true); // Initial fetch and refresh
+  }, [loadCustomers]); // loadCustomers dependency is important here
 
-
-  // Effect for client-side search filtering
   useEffect(() => {
     const lowercasedFilter = searchTerm.toLowerCase();
+    const currentCustomers = allCustomers || [];
     if (searchTerm === '') {
-      setFilteredCustomers(allCustomers);
+      setFilteredCustomers(currentCustomers);
     } else {
-      const currentCustomers = allCustomers || [];
       const filteredData = currentCustomers.filter(customer => {
         const nameMatch = customer.name?.toLowerCase().includes(lowercasedFilter);
         const emailMatch = customer.email?.toLowerCase().includes(lowercasedFilter);
@@ -129,31 +143,36 @@ export default function CustomersPage() {
     }
   }, [searchTerm, allCustomers]);
 
-  // Effect for Intersection Observer - infinite scrolling
   useEffect(() => {
     const currentObserver = observerRef.current; 
+    const currentLoadMoreRef = loadMoreRef.current;
 
-    if (isLoading || !hasMore) {
-      if (currentObserver && loadMoreRef.current) currentObserver.unobserve(loadMoreRef.current);
+    if (!currentLoadMoreRef) {
+      console.log("[CustomersPage] IntersectionObserver useEffect: loadMoreRef.current is null, returning.");
       return;
     }
+    if (isLoading || !hasMore) {
+      console.log(`[CustomersPage] IntersectionObserver useEffect: Not observing. isLoading: ${isLoading}, hasMore: ${hasMore}`);
+      if (currentObserver) currentObserver.unobserve(currentLoadMoreRef);
+      return;
+    }
+    console.log("[CustomersPage] IntersectionObserver useEffect: Setting up observer.");
 
     const observerInstance = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && lastVisibleDoc && !isLoading) { 
+        if (entries[0].isIntersecting && lastVisibleDoc && !isLoading && hasMore) { 
+          console.log("[CustomersPage] IntersectionObserver: Sentinel intersected! Loading more customers.");
           loadCustomers(lastVisibleDoc, false);
         }
       },
       { threshold: 1.0 }
     );
 
-    const currentLoadMoreRef = loadMoreRef.current;
-    if (currentLoadMoreRef) {
-      observerInstance.observe(currentLoadMoreRef);
-    }
+    observerInstance.observe(currentLoadMoreRef);
     observerRef.current = observerInstance; 
 
     return () => {
+      console.log("[CustomersPage] IntersectionObserver useEffect: Cleaning up observer.");
       if (observerInstance && currentLoadMoreRef) {
         observerInstance.unobserve(currentLoadMoreRef);
       }
@@ -162,18 +181,19 @@ export default function CustomersPage() {
 
 
   const handleRefresh = useCallback(() => {
+    console.log("[CustomersPage] handleRefresh: Called.");
     loadCustomers(null, true);
   }, [loadCustomers]);
 
-  const displayCustomers = filteredCustomers;
+  const displayCustomers = searchTerm ? filteredCustomers : allCustomers;
 
   return (
     <>
       <PageHeader
         title="Customers Management"
-        description="View and search customer information from the 'users' collection."
+        description="View and search customer information from the 'users' collection. Check console for Firestore index errors or logs."
         actions={
-          <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading || isInitialLoading}>
+          <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading}>
             <RefreshCcw className="h-4 w-4" />
             <span className="sr-only">Refresh</span>
           </Button>
@@ -201,13 +221,13 @@ export default function CustomersPage() {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 w-full md:w-1/2 lg:w-1/3"
-              disabled={isInitialLoading && allCustomers.length === 0}
+              disabled={isInitialLoading && (allCustomers || []).length === 0}
             />
           </div>
         </CardHeader>
         <CardContent className="p-0">
-            <ScrollArea className="h-[60vh]"> {/* Ensure height is set */}
-              {isInitialLoading && allCustomers.length === 0 ? (
+            <ScrollArea className="h-[60vh]">
+              {isInitialLoading && (allCustomers || []).length === 0 ? (
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -230,14 +250,14 @@ export default function CustomersPage() {
                     ))}
                   </TableBody>
                 </Table>
-              ) : displayCustomers.length === 0 ? (
+              ) : (displayCustomers || []).length === 0 ? (
                 <div className="flex flex-col items-center justify-center text-center p-10 min-h-[300px]">
                   <PackageSearch className="h-12 w-12 text-muted-foreground mb-4" />
                   <h3 className="text-xl font-semibold">
                     {searchTerm ? 'No Customers Match Your Search' : 'No Customers Found'}
                   </h3>
                   <p className="text-muted-foreground">
-                    {searchTerm ? 'Try a different search term or clear search.' : "The 'users' collection might be empty or there was an issue fetching data (check console for index errors)."}
+                    {searchTerm ? 'Try a different search term or clear search.' : "The 'users' collection might be empty or there was an issue fetching data (check console for index errors or logs)."}
                   </p>
                    {searchTerm && (
                     <Button onClick={() => setSearchTerm('')} variant="outline" className="mt-4">Clear Search</Button>
@@ -255,7 +275,7 @@ export default function CustomersPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {displayCustomers.map((customer) => (
+                    {(displayCustomers || []).map((customer) => (
                       <TableRow key={customer.id}>
                         <TableCell className="font-mono text-xs">{customer.id}</TableCell>
                         <TableCell>{customer.email}</TableCell>
@@ -291,7 +311,7 @@ export default function CustomersPage() {
               )}
               <div ref={loadMoreRef} className="h-10 flex items-center justify-center">
                 {isLoading && !isInitialLoading && <p className="text-muted-foreground">Loading more customers...</p>}
-                {!isLoading && !isInitialLoading && !hasMore && displayCustomers.length > 0 && <p className="text-muted-foreground">No more customers to load.</p>}
+                {!isLoading && !isInitialLoading && !hasMore && (displayCustomers || []).length > 0 && <p className="text-muted-foreground">No more customers to load.</p>}
               </div>
             </ScrollArea>
         </CardContent>
