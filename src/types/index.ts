@@ -27,7 +27,7 @@ export interface VipNumber {
   description?: string;
   imageHint?: string;
   isVip?: boolean;
-  sumOfDigits?: string;
+  sumOfDigits?: string; // Numerology sum (single digit)
   totalDigits?: string; // Sum of all digits
   createdAt?: Timestamp; 
   updatedAt?: Timestamp;
@@ -47,7 +47,6 @@ export interface NumberPack {
   id: string; 
   name: string; 
   numbers: NumberPackItem[]; 
-  // packPrice removed
   totalOriginalPrice?: number | null; 
   status: 'available' | 'sold' | 'partially-sold'; 
   categorySlug: string;
@@ -77,13 +76,25 @@ export interface AdminDisplayCustomer {
 }
 
 export interface AdminOrder {
-  id: string; 
-  orderId: string; 
-  customerName: string; 
-  date: Timestamp;
-  totalAmount: number;
-  status: string;
-  createdAt: Timestamp;
+  id: string; // Firestore document ID
+  orderId: string; // Your custom order identifier
+  customerName: string;
+  customerEmail: string;
+  customerId: string;
+  orderDate: Timestamp;
+  amount: number;
+  currency: string;
+  orderStatus: string; // e.g., "created", "processing", "shipped"
+  paymentStatus: string; // e.g., "pending", "paid"
+  items: string; // Summary string of items
+  itemCount: number;
+  createdAt?: Timestamp; // Firestore server timestamp
+  updatedAt?: Timestamp; // Firestore server timestamp
+  // You can add other fields from your structure as needed
+  // notes?: { email?: string; itemCount?: number; itemDetails?: string; name?: string; selectedOriginalVipNumberIds?: string[] };
+  // userId?: string;
+  // paymentId?: string;
+  // receipt?: string;
 }
 
 export interface DashboardStats {
@@ -92,3 +103,4 @@ export interface DashboardStats {
   ordersThisMonth: number;
   productsInStock: number;
 }
+
