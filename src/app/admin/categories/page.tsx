@@ -8,12 +8,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { MoreHorizontal, Edit, Trash2, PlusCircle, FolderKanban, PackageSearch, Search as SearchIcon, RefreshCcw } from 'lucide-react';
+import { MoreHorizontal, Edit, Trash2, PlusCircle, FolderKanban, PackageSearch, Search as SearchIcon, RefreshCcw, Filter as FilterIcon, CalendarIcon } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
-import { collection, query, orderBy, Timestamp, doc, deleteDoc, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData, endBefore } from 'firebase/firestore';
+import { collection, query, orderBy, Timestamp, doc, deleteDoc, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData, endBefore, where, QueryConstraint } from 'firebase/firestore';
 import type { Category } from '@/types';
 import { format } from 'date-fns';
 import { CategoryDialog } from '@/components/categories/CategoryDialog';
@@ -28,15 +28,30 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+
 
 const PAGE_SIZE = 10;
+const CATEGORY_TYPES = ["individual", "pack"];
+
+interface ActiveFilters {
+  type?: string;
+  dateFrom?: Date;
+  dateTo?: Date;
+}
 
 export default function CategoriesPage() {
   const [allCategories, setAllCategories] = useState<Category[]>([]);
   const [filteredCategories, setFilteredCategories] = useState<Category[]>([]);
+  
   const [isLoading, setIsLoading] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
+  
   const [lastVisibleDoc, setLastVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [firstVisibleDoc, setFirstVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasMore, setHasMore] = useState(true);
   
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -46,44 +61,76 @@ export default function CategoriesPage() {
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Filter input states
+  const [filterType, setFilterType] = useState<string>('');
+  const [filterDateFrom, setFilterDateFrom] = useState<Date | undefined>(undefined);
+  const [filterDateTo, setFilterDateTo] = useState<Date | undefined>(undefined);
+  const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
+  
+  // Applied filters
+  const [activeFilters, setActiveFilters] = useState<ActiveFilters>({});
+
   const observerRef = useRef<IntersectionObserver | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
-  const buildBaseQuery = useCallback(() => {
-    return query(
-      collection(db, 'categories'),
-      orderBy('order', 'asc'),
-      orderBy('createdAt', 'desc')
-    );
+  const buildBaseQuery = useCallback((currentFilters: ActiveFilters) => {
+    const constraints: QueryConstraint[] = [];
+
+    if (currentFilters.type) {
+      constraints.push(where('type', '==', currentFilters.type));
+    }
+    if (currentFilters.dateFrom) {
+      const fromDateStart = new Date(currentFilters.dateFrom);
+      fromDateStart.setHours(0, 0, 0, 0);
+      constraints.push(where('createdAt', '>=', Timestamp.fromDate(fromDateStart)));
+    }
+    if (currentFilters.dateTo) {
+      const toDateEnd = new Date(currentFilters.dateTo);
+      toDateEnd.setHours(23, 59, 59, 999);
+      constraints.push(where('createdAt', '<=', Timestamp.fromDate(toDateEnd)));
+    }
+    
+    constraints.push(orderBy('order', 'asc'));
+    constraints.push(orderBy('createdAt', 'desc'));
+    
+    return query(collection(db, 'categories'), ...constraints);
   }, []);
 
-  const fetchCategories = useCallback(async (cursor: QueryDocumentSnapshot<DocumentData> | null = null, isRefresh = false) => {
-    if (isLoading && !isRefresh) return;
+  const fetchCategories = useCallback(async (
+    cursor: QueryDocumentSnapshot<DocumentData> | null = null,
+    isRefreshOrFilterChange = false,
+    filtersForThisFetch: ActiveFilters
+  ) => {
+    if (isLoading && !isRefreshOrFilterChange) return;
 
     setIsLoading(true);
-    if (isRefresh) {
+    if (isRefreshOrFilterChange) {
       setIsInitialLoading(true);
-      setSearchTerm(''); // Clear search on refresh
     }
 
     try {
-      let categoriesQuery = buildBaseQuery();
+      let categoriesQuery = buildBaseQuery(filtersForThisFetch);
       if (cursor) {
         categoriesQuery = query(categoriesQuery, startAfter(cursor), limit(PAGE_SIZE));
-      } else { // Initial load or refresh
+      } else {
         categoriesQuery = query(categoriesQuery, limit(PAGE_SIZE));
       }
       
       const documentSnapshots = await getDocs(categoriesQuery);
-      const fetchedCategories: Category[] = [];
+      const fetchedCategoriesBatch: Category[] = [];
       documentSnapshots.docs.forEach((docSn) => {
-        fetchedCategories.push({ id: docSn.id, ...docSn.data() } as Category);
+        fetchedCategoriesBatch.push({ id: docSn.id, ...docSn.data() } as Category);
       });
       
-      if (isRefresh) {
-        setAllCategories(fetchedCategories);
+      if (isRefreshOrFilterChange || !cursor) {
+        setAllCategories(fetchedCategoriesBatch);
+        if (documentSnapshots.docs.length > 0) {
+            setFirstVisibleDoc(documentSnapshots.docs[0]);
+        } else {
+            setFirstVisibleDoc(null);
+        }
       } else {
-        setAllCategories(prevCategories => [...prevCategories, ...fetchedCategories]);
+        setAllCategories(prevCategories => [...prevCategories, ...fetchedCategoriesBatch]);
       }
       
       const newLastVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null;
@@ -94,22 +141,23 @@ export default function CategoriesPage() {
       console.error("Error fetching categories: ", error);
       toast({
         title: 'Error Fetching Categories',
-        description: (error as Error).message || 'Could not load categories. A Firestore index on \'categories\' for \'order\' (ASC) then \'createdAt\' (DESC) may be required.',
+        description: (error as Error).message || 'Could not load categories. Check Firestore indexes for order, createdAt, and type combinations.',
         variant: 'destructive',
       });
-      setHasMore(false); // Stop further loading attempts on error
+      setHasMore(false);
     } finally {
       setIsLoading(false);
-      if (isRefresh) setIsInitialLoading(false);
+      if (isRefreshOrFilterChange) setIsInitialLoading(false);
     }
-  }, [isLoading, buildBaseQuery, toast, setIsLoading, setIsInitialLoading, setAllCategories, setLastVisibleDoc, setHasMore, setSearchTerm]); 
+  }, [toast, buildBaseQuery, setIsLoading, setIsInitialLoading, setAllCategories, setLastVisibleDoc, setFirstVisibleDoc, setHasMore]);
 
-  // Initial data fetch
+  // Effect for initial load AND when activeFilters change
   useEffect(() => {
-    fetchCategories(null, true);
-  }, [fetchCategories]);
+    setSearchTerm(''); // Clear client-side search when filters change
+    fetchCategories(null, true, activeFilters); // isRefreshOrFilterChange = true
+  }, [activeFilters, fetchCategories]);
 
-  // Client-side search filtering
+  // Client-side search filtering on accumulated data
   useEffect(() => {
     if (searchTerm === '') {
       setFilteredCategories(allCategories);
@@ -136,7 +184,7 @@ export default function CategoriesPage() {
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && lastVisibleDoc) {
-          fetchCategories(lastVisibleDoc, false);
+          fetchCategories(lastVisibleDoc, false, activeFilters); // Pass current activeFilters
         }
       },
       { threshold: 1.0 }
@@ -152,7 +200,7 @@ export default function CategoriesPage() {
         observer.unobserve(currentLoadMoreRef);
       }
     };
-  }, [isLoading, hasMore, lastVisibleDoc, fetchCategories]);
+  }, [isLoading, hasMore, lastVisibleDoc, fetchCategories, activeFilters]);
   
   const handleAddNewCategory = () => {
     setEditingCategory(null);
@@ -186,7 +234,7 @@ export default function CategoriesPage() {
         title: 'Category Deleted',
         description: `Category "${categoryToDelete.title}" has been successfully deleted.`,
       });
-      fetchCategories(null, true); // Refresh all data from the beginning
+      fetchCategories(null, true, activeFilters); // Refresh all data with current filters
     } catch (error) {
       console.error("Error deleting category: ", error);
       toast({
@@ -201,22 +249,114 @@ export default function CategoriesPage() {
   };
   
   const onDialogSuccess = useCallback(() => {
-    fetchCategories(null, true); // Refresh all data from the beginning
-  }, [fetchCategories]);
+    fetchCategories(null, true, activeFilters); // Refresh all data with current filters
+  }, [fetchCategories, activeFilters]);
 
   const handleRefresh = useCallback(() => {
-    fetchCategories(null, true);
-  }, [fetchCategories]);
+    setSearchTerm(''); // Clear client search
+    fetchCategories(null, true, activeFilters); // Refresh with current active filters
+  }, [fetchCategories, activeFilters]);
 
-  const displayCategories = searchTerm ? filteredCategories : allCategories;
+
+  const handleApplyFilters = () => {
+    const newActiveFilters: ActiveFilters = {};
+    if (filterType) newActiveFilters.type = filterType;
+    if (filterDateFrom) newActiveFilters.dateFrom = filterDateFrom;
+    if (filterDateTo) newActiveFilters.dateTo = filterDateTo;
+    
+    setActiveFilters(newActiveFilters); // This will trigger the useEffect for fetchCategories
+    setIsFilterPopoverOpen(false);
+  };
+
+  const handleClearFilters = () => {
+    setFilterType('');
+    setFilterDateFrom(undefined);
+    setFilterDateTo(undefined);
+    setActiveFilters({}); // This will trigger the useEffect for fetchCategories
+    setIsFilterPopoverOpen(false);
+  };
+
+  const displayCategories = filteredCategories; // Use client-side filtered list for display
+
+  const getActiveFilterCount = () => {
+    return Object.values(activeFilters).filter(v => v !== undefined && v !== '').length;
+  }
+
 
   return (
     <>
       <PageHeader
         title="Categories Management"
-        description="Manage product categories for your shop."
+        description="Manage product categories for your shop. Check console for Firestore index errors."
         actions={
           <div className="flex items-center gap-2">
+             <Popover open={isFilterPopoverOpen} onOpenChange={setIsFilterPopoverOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" disabled={isInitialLoading || isLoading}>
+                  <FilterIcon className="mr-2 h-4 w-4" />
+                  Filters {getActiveFilterCount() > 0 && `(${getActiveFilterCount()})`}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80" align="end">
+                <div className="grid gap-4">
+                  <div className="space-y-2">
+                    <h4 className="font-medium leading-none">Category Filters</h4>
+                    <p className="text-sm text-muted-foreground">
+                      Apply filters to narrow down categories.
+                    </p>
+                  </div>
+                  <div className="grid gap-3">
+                    <div>
+                      <Label htmlFor="catFilterType">Type</Label>
+                      <Select value={filterType} onValueChange={setFilterType}>
+                        <SelectTrigger id="catFilterType">
+                            <SelectValue placeholder="All Types" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {CATEGORY_TYPES.map(type => (
+                            <SelectItem key={type} value={type} className="capitalize">{type}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                     <div className="grid grid-cols-2 gap-2">
+                        <div>
+                            <Label htmlFor="catDateFrom">Created From</Label>
+                            <Popover>
+                                <PopoverTrigger asChild>
+                                <Button id="catDateFrom" variant={"outline"} className="w-full justify-start text-left font-normal" >
+                                    <CalendarIcon className="mr-2 h-4 w-4" />
+                                    {filterDateFrom ? format(filterDateFrom, "PPP") : <span>Pick a date</span>}
+                                </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0">
+                                <Calendar mode="single" selected={filterDateFrom} onSelect={setFilterDateFrom} initialFocus />
+                                </PopoverContent>
+                            </Popover>
+                        </div>
+                        <div>
+                            <Label htmlFor="catDateTo">Created To</Label>
+                             <Popover>
+                                <PopoverTrigger asChild>
+                                <Button id="catDateTo" variant={"outline"} className="w-full justify-start text-left font-normal" >
+                                    <CalendarIcon className="mr-2 h-4 w-4" />
+                                    {filterDateTo ? format(filterDateTo, "PPP") : <span>Pick a date</span>}
+                                </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0">
+                                <Calendar mode="single" selected={filterDateTo} onSelect={setFilterDateTo} disabled={(date) => filterDateFrom ? date < filterDateFrom : false } initialFocus />
+                                </PopoverContent>
+                            </Popover>
+                        </div>
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-2 border-t mt-2">
+                    <Button variant="ghost" onClick={handleClearFilters}>Clear</Button>
+                    <Button onClick={handleApplyFilters} className="bg-primary hover:bg-primary/90">Apply Filters</Button>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
             <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading || isInitialLoading}>
               <RefreshCcw className="h-4 w-4" />
               <span className="sr-only">Refresh</span>
@@ -231,11 +371,11 @@ export default function CategoriesPage() {
         <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
         <Input
           type="search"
-          placeholder="Search by title or slug..."
+          placeholder="Search by title or slug (on loaded data)..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="pl-10 w-full md:w-1/2 lg:w-1/3"
-          disabled={isInitialLoading && allCategories.length === 0}
+          disabled={isInitialLoading && allCategories.length === 0 && !Object.values(activeFilters).some(Boolean)}
         />
       </div>
       <Card className="shadow-lg">
@@ -246,7 +386,7 @@ export default function CategoriesPage() {
           </CardTitle>
           <CardDescription>
             View, add, edit, and delete categories. Scroll to load more.
-            A Firestore index on 'categories' for 'order' (ASC) then 'createdAt' (DESC) is required.
+            A Firestore index on 'categories' for 'order' (ASC) then 'createdAt' (DESC) is required. Other indexes for filters may be needed.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -268,12 +408,12 @@ export default function CategoriesPage() {
                 <div className="flex flex-col items-center justify-center text-center p-10 min-h-[300px]">
                   <PackageSearch className="h-12 w-12 text-muted-foreground mb-4" />
                   <h3 className="text-xl font-semibold">
-                    {searchTerm ? 'No Categories Match Your Search' : 'No Categories Found'}
+                    {searchTerm || getActiveFilterCount() > 0 ? 'No Categories Match Your Search/Filters' : 'No Categories Found'}
                   </h3>
                   <p className="text-muted-foreground">
-                    {searchTerm ? 'Try a different search term or clear search.' : 'Create your first category to see it listed here.'}
+                    {searchTerm || getActiveFilterCount() > 0 ? 'Try different criteria or clear search/filters.' : 'Create your first category to see it listed here.'}
                   </p>
-                  {!searchTerm && (
+                  {(!searchTerm && getActiveFilterCount() === 0) && (
                     <Button onClick={handleAddNewCategory} className="mt-4 bg-primary hover:bg-primary/90">
                       <PlusCircle className="mr-2 h-4 w-4" /> Add First Category
                     </Button>
@@ -373,4 +513,6 @@ export default function CategoriesPage() {
     </>
   );
 }
+    
+
     
