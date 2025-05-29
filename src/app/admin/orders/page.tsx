@@ -71,26 +71,22 @@ export default function OrdersPage() {
   const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>({});
 
-  const buildBaseQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null) => {
+  const buildBaseQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null, currentFilters: ActiveFilters) => {
     const constraints: QueryConstraint[] = [];
 
-    if (activeFilters.status) {
-      constraints.push(where('orderStatus', '==', activeFilters.status));
+    if (currentFilters.status) {
+      constraints.push(where('orderStatus', '==', currentFilters.status));
     }
-    if (activeFilters.dateFrom) {
-      constraints.push(where('orderDate', '>=', Timestamp.fromDate(activeFilters.dateFrom)));
+    if (currentFilters.dateFrom) {
+      constraints.push(where('orderDate', '>=', Timestamp.fromDate(currentFilters.dateFrom)));
     }
-    if (activeFilters.dateTo) {
-      const toDateEnd = new Date(activeFilters.dateTo);
+    if (currentFilters.dateTo) {
+      const toDateEnd = new Date(currentFilters.dateTo);
       toDateEnd.setHours(23, 59, 59, 999);
       constraints.push(where('orderDate', '<=', Timestamp.fromDate(toDateEnd)));
     }
     
-    // Primary sort order
     constraints.push(orderBy('orderDate', 'desc'));
-    // If adding more orderBy clauses, ensure they align with Firestore indexing rules
-    // For example, if orderDate can be the same, you might need a secondary sort like orderBy(documentId(), 'desc')
-    // constraints.push(orderBy(documentId(), 'desc')); // Example secondary sort
 
     if (cursor) {
       constraints.push(startAfter(cursor));
@@ -98,19 +94,21 @@ export default function OrdersPage() {
     constraints.push(limit(PAGE_SIZE));
 
     return query(collection(db, 'orders'), ...constraints);
-  }, [activeFilters]);
+  }, []);
 
-  const fetchOrders = useCallback(async (cursor: QueryDocumentSnapshot<DocumentData> | null, isRefresh = false) => {
-    if (isLoading && !isRefresh) return; // Prevent multiple fetches if already loading more
+  const fetchOrders = useCallback(async (cursor: QueryDocumentSnapshot<DocumentData> | null, isRefreshOrFilterChange = false) => {
+    if (isLoading && !isRefreshOrFilterChange) return; 
     
-    if (isRefresh || !cursor) {
+    if (isRefreshOrFilterChange) {
       setIsInitialLoading(true);
-      setAllOrders([]); // Clear existing orders on refresh or filter change
+      setAllOrders([]); 
+      setLastVisibleDoc(null);
+      setHasMore(true);
     }
     setIsLoading(true);
 
     try {
-      const ordersQuery = buildBaseQuery(cursor);
+      const ordersQuery = buildBaseQuery(cursor, activeFilters);
       const documentSnapshots = await getDocs(ordersQuery);
       
       let fetchedOrders: AdminOrder[] = [];
@@ -118,7 +116,6 @@ export default function OrdersPage() {
         fetchedOrders.push({ id: docSn.id, ...docSn.data() } as AdminOrder);
       });
 
-      // Client-side filtering for amount range
       if (typeof activeFilters.minAmount === 'number' || typeof activeFilters.maxAmount === 'number') {
         fetchedOrders = fetchedOrders.filter(order => {
           const amount = order.amount;
@@ -128,7 +125,7 @@ export default function OrdersPage() {
         });
       }
       
-      setAllOrders(prevOrders => isRefresh || !cursor ? fetchedOrders : [...prevOrders, ...fetchedOrders]);
+      setAllOrders(prevOrders => isRefreshOrFilterChange ? fetchedOrders : [...prevOrders, ...fetchedOrders]);
       
       const newLastVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null;
       setLastVisibleDoc(newLastVisibleDoc);
@@ -141,22 +138,23 @@ export default function OrdersPage() {
         description: (error as Error).message || 'Could not load orders. Check console for details & ensure Firestore indexes are set up for current filters.',
         variant: 'destructive',
       });
-      setHasMore(false); // Stop trying to load more on error
+      setHasMore(false);
     } finally {
       setIsLoading(false);
       setIsInitialLoading(false);
     }
-  }, [toast, buildBaseQuery, activeFilters.minAmount, activeFilters.maxAmount, isLoading]);
+  }, [toast, buildBaseQuery, activeFilters, isLoading]); // isLoading added to deps to prevent multiple calls if one is already in progress
+
 
   useEffect(() => {
-    // Initial fetch or fetch when activeFilters change
-    fetchOrders(null, true); // Pass true for isRefresh to clear existing items
-  }, [activeFilters, fetchOrders]); // `fetchOrders` is memoized, `activeFilters` triggers new "initial" fetch
+    // Fetch on initial mount and when activeFilters change
+    fetchOrders(null, true); 
+  }, [activeFilters, fetchOrders]); // fetchOrders is memoized
 
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !isLoading && !isInitialLoading) {
+        if (entries[0].isIntersecting && hasMore && !isLoading && !isInitialLoading && lastVisibleDoc) {
           fetchOrders(lastVisibleDoc);
         }
       },
@@ -191,10 +189,9 @@ export default function OrdersPage() {
 
   const handleRefresh = useCallback(() => {
     setSearchTerm('');
-    setLastVisibleDoc(null); // Reset cursor for refresh
-    setHasMore(true); // Assume there might be more data on refresh
-    fetchOrders(null, true); // Fetch first page, marking as refresh
-  }, [fetchOrders]);
+    // activeFilters remain the same, just re-fetch page 1 with current filters
+    fetchOrders(null, true); 
+  }, [fetchOrders, setSearchTerm]);
 
   const openDetailsDialog = useCallback((order: AdminOrder) => {
     setSelectedOrderForDetails(order);
@@ -218,8 +215,7 @@ export default function OrdersPage() {
         title: 'Status Updated',
         description: `Order ${orderId} marked as delivered.`,
       });
-      // Optimistically update the local state or refresh
-      setAllOrders(prev => prev.map(o => o.id === orderId ? {...o, orderStatus: 'delivered'} : o));
+      setAllOrders(prev => prev.map(o => o.id === orderId ? {...o, orderStatus: 'delivered', updatedAt: Timestamp.now()} : o));
     } catch (error) {
       console.error("Error updating order status: ", error);
       toast({
@@ -287,7 +283,7 @@ export default function OrdersPage() {
     const maxAmountNum = parseFloat(filterMaxAmount);
     if (!isNaN(maxAmountNum)) newActiveFilters.maxAmount = maxAmountNum;
 
-    setActiveFilters(newActiveFilters); // This will trigger the useEffect to re-fetch
+    setActiveFilters(newActiveFilters); 
     setIsFilterPopoverOpen(false);
   };
 
@@ -297,7 +293,7 @@ export default function OrdersPage() {
     setFilterStatus('');
     setFilterMinAmount('');
     setFilterMaxAmount('');
-    setActiveFilters({}); // This will trigger the useEffect to re-fetch
+    setActiveFilters({}); 
     setIsFilterPopoverOpen(false);
   };
 
@@ -428,7 +424,7 @@ export default function OrdersPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {[...Array(PAGE_SIZE / 2)].map((_, i) => ( // Show fewer skeletons initially
+                  {[...Array(Math.floor(PAGE_SIZE / 2))].map((_, i) => ( // Show fewer skeletons initially
                     <TableRow key={`skeleton-${i}`}>
                       <TableCell><Skeleton className="h-5 w-24" /></TableCell><TableCell><Skeleton className="h-5 w-32" /></TableCell><TableCell><Skeleton className="h-5 w-40" /></TableCell><TableCell><Skeleton className="h-5 w-20" /></TableCell><TableCell><Skeleton className="h-6 w-24" /></TableCell><TableCell className="text-right"><Skeleton className="h-8 w-8 ml-auto" /></TableCell>
                     </TableRow>
@@ -525,4 +521,3 @@ export default function OrdersPage() {
     </>
   );
 }
-
