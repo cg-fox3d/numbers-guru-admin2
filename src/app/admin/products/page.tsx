@@ -5,7 +5,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Filter as FilterIcon, RefreshCcw } from 'lucide-react';
+import { Filter as FilterIcon } from 'lucide-react';
 import { VipNumbersTab } from '@/components/products/VipNumbersTab';
 import { NumberPacksTab } from '@/components/products/NumberPacksTab';
 import { db } from '@/lib/firebase';
@@ -40,8 +40,7 @@ export default function ProductsPage() {
   const [categoryMap, setCategoryMap] = useState<Record<string, string>>({});
   const [isLoadingCategories, setIsLoadingCategories] = useState(true);
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState('vipNumbers'); // To potentially adjust filter options if needed later
-
+  
   // Filter input states
   const [filterDateFrom, setFilterDateFrom] = useState<Date | undefined>(undefined);
   const [filterDateTo, setFilterDateTo] = useState<Date | undefined>(undefined);
@@ -101,7 +100,7 @@ export default function ProductsPage() {
     setIsFilterPopoverOpen(false);
   };
 
-  const handleClearFilters = () => {
+  const handleClearFilters = useCallback(() => {
     setFilterDateFrom(undefined);
     setFilterDateTo(undefined);
     setFilterStatus('');
@@ -109,8 +108,8 @@ export default function ProductsPage() {
     setFilterMinPrice('');
     setFilterMaxPrice('');
     setActiveFilters({});
-    setIsFilterPopoverOpen(false);
-  };
+    setIsFilterPopoverOpen(false); // Close popover if open
+  }, []); // Empty dependency array as setters are stable
   
   const getActiveFilterCount = () => {
     return Object.values(activeFilters).filter(v => {
@@ -120,9 +119,9 @@ export default function ProductsPage() {
     }).length;
   };
 
-  // A simple way to trigger refresh in child tabs is to change a prop, like a refreshKey
-  // However, for simplicity, we'll rely on activeFilters changing to trigger re-fetch in tabs.
-  // If more direct refresh is needed, a 'refreshKey' prop could be passed and incremented.
+  const handleTabChange = () => {
+    handleClearFilters();
+  };
 
   return (
     <>
@@ -197,9 +196,12 @@ export default function ProductsPage() {
                             <SelectValue placeholder={isLoadingCategories ? "Loading cats..." : "All Categories"} />
                         </SelectTrigger>
                         <SelectContent>
-                          {categories.map(category => (
-                            <SelectItem key={category.id} value={category.slug}>{category.title}</SelectItem>
-                          ))}
+                          {categories.map((category) => {
+                            if (!category.slug || category.slug.trim() === '') return null; // Skip categories with empty slugs
+                            return (
+                              <SelectItem key={category.id} value={category.slug}>{category.title}</SelectItem>
+                            );
+                          })}
                         </SelectContent>
                       </Select>
                     </div>
@@ -221,18 +223,17 @@ export default function ProductsPage() {
                 </div>
               </PopoverContent>
             </Popover>
-             {/* The refresh button is now inside each tab for tab-specific refresh */}
           </div>
         }
       />
 
-      {isLoadingCategories && !categories.length ? ( // Show skeleton only if categories are loading for the first time
+      {isLoadingCategories && !categories.length ? ( 
         <div className="space-y-4">
           <Skeleton className="h-10 w-1/3 mb-6" />
           <Skeleton className="h-64 w-full" />
         </div>
       ) : (
-        <Tabs defaultValue="vipNumbers" className="w-full" onValueChange={setActiveTab}>
+        <Tabs defaultValue="vipNumbers" className="w-full" onValueChange={handleTabChange}>
           <TabsList className="grid w-full grid-cols-2 md:w-1/2 lg:w-1/3 mb-6">
             <TabsTrigger value="vipNumbers">VIP Numbers</TabsTrigger>
             <TabsTrigger value="numberPacks">Number Packs</TabsTrigger>
@@ -249,3 +250,4 @@ export default function ProductsPage() {
   );
 }
     
+
