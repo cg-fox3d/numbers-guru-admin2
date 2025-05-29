@@ -59,14 +59,11 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
   const loadVipNumbers = useCallback(async (cursor: QueryDocumentSnapshot<DocumentData> | null = null, isRefresh = false) => {
     if (isLoading && !isRefresh) return;
 
+    setIsLoading(true);
     if (isRefresh) {
       setIsInitialLoading(true);
-      setAllVipNumbers([]);
-      setLastVisibleDoc(null);
-      setHasMore(true);
-      setSearchTerm('');
+      setSearchTerm(''); 
     }
-    setIsLoading(true);
 
     try {
       let vipNumbersQuery = buildBaseQuery();
@@ -82,7 +79,11 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
         fetchedVipNumbers.push({ id: docSn.id, ...docSn.data() } as VipNumber);
       });
       
-      setAllVipNumbers(prevNumbers => isRefresh ? fetchedVipNumbers : [...prevNumbers, ...fetchedVipNumbers]);
+      if (isRefresh) {
+        setAllVipNumbers(fetchedVipNumbers);
+      } else {
+        setAllVipNumbers(prevNumbers => [...prevNumbers, ...fetchedVipNumbers]);
+      }
       
       const newLastVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null;
       setLastVisibleDoc(newLastVisibleDoc);
@@ -100,7 +101,7 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
       setIsLoading(false);
       if (isRefresh) setIsInitialLoading(false);
     }
-  }, [isLoading, buildBaseQuery, toast]);
+  }, [isLoading, buildBaseQuery, toast, setIsLoading, setIsInitialLoading, setAllVipNumbers, setLastVisibleDoc, setHasMore, setSearchTerm ]);
 
   useEffect(() => {
     loadVipNumbers(null, true); // Initial fetch
@@ -119,26 +120,34 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
   }, [searchTerm, allVipNumbers]);
 
   useEffect(() => {
+    const currentObserver = observerRef.current;
+    const currentLoadMoreRef = loadMoreRef.current;
+
+     if (isLoading || !hasMore) {
+      if (currentObserver && currentLoadMoreRef) currentObserver.unobserve(currentLoadMoreRef);
+      return;
+    }
+
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !isLoading && !isInitialLoading && lastVisibleDoc) {
-          loadVipNumbers(lastVisibleDoc);
+        if (entries[0].isIntersecting && lastVisibleDoc) {
+          loadVipNumbers(lastVisibleDoc, false);
         }
       },
       { threshold: 1.0 }
     );
 
-    if (loadMoreRef.current) {
-      observer.observe(loadMoreRef.current);
+    if (currentLoadMoreRef) {
+      observer.observe(currentLoadMoreRef);
     }
     observerRef.current = observer;
 
     return () => {
-      if (observerRef.current) {
-        observerRef.current.disconnect();
+      if (observer && currentLoadMoreRef) {
+        observer.unobserve(currentLoadMoreRef);
       }
     };
-  }, [hasMore, isLoading, isInitialLoading, lastVisibleDoc, loadVipNumbers]);
+  }, [isLoading, hasMore, lastVisibleDoc, loadVipNumbers]);
 
   const handleAddNewVipNumber = () => {
     setEditingVipNumber(null);
@@ -153,6 +162,11 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
   const openDeleteConfirmDialog = (product: VipNumber) => {
     setVipNumberToDelete(product);
   };
+
+  const handleDialogClose = useCallback(() => {
+    setIsDialogOpen(false);
+    setEditingVipNumber(null);
+  }, []);
 
   const closeDeleteConfirmDialog = useCallback(() => {
     setVipNumberToDelete(null);
@@ -184,11 +198,6 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
   const onDialogSuccess = useCallback(() => {
     loadVipNumbers(null, true); // Refresh all data
   }, [loadVipNumbers]);
-
-  const handleDialogClose = useCallback(() => {
-    setIsDialogOpen(false);
-    setEditingVipNumber(null);
-  }, []);
 
   const handleRefresh = useCallback(() => {
     loadVipNumbers(null, true);
@@ -228,7 +237,7 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
       </CardHeader>
       <CardContent className="p-0">
         <ScrollArea className="h-[60vh]"> {/* Ensure height is set for ScrollArea */}
-          {isInitialLoading ? (
+          {isInitialLoading && allVipNumbers.length === 0 ? (
             <div className="p-6 space-y-2">
               {[...Array(Math.floor(PAGE_SIZE / 2))].map((_, i) => (
                 <div key={i} className="flex items-center justify-between p-2 border rounded-md">

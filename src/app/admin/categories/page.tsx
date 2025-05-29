@@ -13,7 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
-import { collection, query, orderBy, Timestamp, doc, deleteDoc, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
+import { collection, query, orderBy, Timestamp, doc, deleteDoc, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData, endBefore } from 'firebase/firestore';
 import type { Category } from '@/types';
 import { format } from 'date-fns';
 import { CategoryDialog } from '@/components/categories/CategoryDialog';
@@ -60,20 +60,17 @@ export default function CategoriesPage() {
   const fetchCategories = useCallback(async (cursor: QueryDocumentSnapshot<DocumentData> | null = null, isRefresh = false) => {
     if (isLoading && !isRefresh) return;
 
+    setIsLoading(true);
     if (isRefresh) {
       setIsInitialLoading(true);
-      setAllCategories([]);
-      setLastVisibleDoc(null);
-      setHasMore(true);
-      setSearchTerm('');
+      setSearchTerm(''); // Clear search on refresh
     }
-    setIsLoading(true);
 
     try {
       let categoriesQuery = buildBaseQuery();
       if (cursor) {
         categoriesQuery = query(categoriesQuery, startAfter(cursor), limit(PAGE_SIZE));
-      } else {
+      } else { // Initial load or refresh
         categoriesQuery = query(categoriesQuery, limit(PAGE_SIZE));
       }
       
@@ -83,7 +80,11 @@ export default function CategoriesPage() {
         fetchedCategories.push({ id: docSn.id, ...docSn.data() } as Category);
       });
       
-      setAllCategories(prevCategories => isRefresh ? fetchedCategories : [...prevCategories, ...fetchedCategories]);
+      if (isRefresh) {
+        setAllCategories(fetchedCategories);
+      } else {
+        setAllCategories(prevCategories => [...prevCategories, ...fetchedCategories]);
+      }
       
       const newLastVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null;
       setLastVisibleDoc(newLastVisibleDoc);
@@ -96,17 +97,19 @@ export default function CategoriesPage() {
         description: (error as Error).message || 'Could not load categories. A Firestore index on \'categories\' for \'order\' (ASC) then \'createdAt\' (DESC) may be required.',
         variant: 'destructive',
       });
-      setHasMore(false);
+      setHasMore(false); // Stop further loading attempts on error
     } finally {
       setIsLoading(false);
       if (isRefresh) setIsInitialLoading(false);
     }
-  }, [isLoading, buildBaseQuery, toast]); 
+  }, [isLoading, buildBaseQuery, toast, setIsLoading, setIsInitialLoading, setAllCategories, setLastVisibleDoc, setHasMore, setSearchTerm]); 
 
+  // Initial data fetch
   useEffect(() => {
-    fetchCategories(null, true); // Initial fetch
+    fetchCategories(null, true);
   }, [fetchCategories]);
 
+  // Client-side search filtering
   useEffect(() => {
     if (searchTerm === '') {
       setFilteredCategories(allCategories);
@@ -120,27 +123,36 @@ export default function CategoriesPage() {
     }
   }, [searchTerm, allCategories]);
 
+  // Intersection Observer for infinite scroll
   useEffect(() => {
+    const currentObserver = observerRef.current;
+    const currentLoadMoreRef = loadMoreRef.current;
+
+    if (isLoading || !hasMore) {
+      if (currentObserver && currentLoadMoreRef) currentObserver.unobserve(currentLoadMoreRef);
+      return;
+    }
+
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !isLoading && !isInitialLoading && lastVisibleDoc) {
-          fetchCategories(lastVisibleDoc);
+        if (entries[0].isIntersecting && lastVisibleDoc) {
+          fetchCategories(lastVisibleDoc, false);
         }
       },
       { threshold: 1.0 }
     );
 
-    if (loadMoreRef.current) {
-      observer.observe(loadMoreRef.current);
+    if (currentLoadMoreRef) {
+      observer.observe(currentLoadMoreRef);
     }
     observerRef.current = observer;
 
     return () => {
-      if (observerRef.current) {
-        observerRef.current.disconnect();
+      if (observer && currentLoadMoreRef) {
+        observer.unobserve(currentLoadMoreRef);
       }
     };
-  }, [hasMore, isLoading, isInitialLoading, lastVisibleDoc, fetchCategories]);
+  }, [isLoading, hasMore, lastVisibleDoc, fetchCategories]);
   
   const handleAddNewCategory = () => {
     setEditingCategory(null);
@@ -156,6 +168,11 @@ export default function CategoriesPage() {
     setCategoryToDelete(category);
   };
 
+  const handleDialogClose = useCallback(() => {
+    setIsDialogOpen(false);
+    setEditingCategory(null);
+  }, []);
+  
   const closeDeleteConfirmDialog = useCallback(() => {
     setCategoryToDelete(null);
   }, []);
@@ -169,7 +186,7 @@ export default function CategoriesPage() {
         title: 'Category Deleted',
         description: `Category "${categoryToDelete.title}" has been successfully deleted.`,
       });
-      fetchCategories(null, true); // Refresh all data
+      fetchCategories(null, true); // Refresh all data from the beginning
     } catch (error) {
       console.error("Error deleting category: ", error);
       toast({
@@ -184,13 +201,8 @@ export default function CategoriesPage() {
   };
   
   const onDialogSuccess = useCallback(() => {
-    fetchCategories(null, true); // Refresh all data
+    fetchCategories(null, true); // Refresh all data from the beginning
   }, [fetchCategories]);
-
-  const handleDialogClose = useCallback(() => {
-    setIsDialogOpen(false);
-    setEditingCategory(null);
-  }, []);
 
   const handleRefresh = useCallback(() => {
     fetchCategories(null, true);
@@ -233,13 +245,13 @@ export default function CategoriesPage() {
             <span>Categories List</span>
           </CardTitle>
           <CardDescription>
-            View, add, edit, and delete categories.
+            View, add, edit, and delete categories. Scroll to load more.
             A Firestore index on 'categories' for 'order' (ASC) then 'createdAt' (DESC) is required.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
             <ScrollArea className="h-[60vh]"> {/* Ensure height is set for ScrollArea */}
-              {isInitialLoading ? (
+              {isInitialLoading && allCategories.length === 0 ? (
                 <div className="p-6 space-y-2">
                   {[...Array(Math.floor(PAGE_SIZE / 2))].map((_, i) => ( 
                     <div key={i} className="flex items-center justify-between p-2 border rounded-md">

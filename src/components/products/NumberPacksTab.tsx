@@ -59,14 +59,11 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
   const loadNumberPacks = useCallback(async (cursor: QueryDocumentSnapshot<DocumentData> | null = null, isRefresh = false) => {
     if (isLoading && !isRefresh) return;
 
+    setIsLoading(true);
     if (isRefresh) {
       setIsInitialLoading(true);
-      setAllNumberPacks([]);
-      setLastVisibleDoc(null);
-      setHasMore(true);
       setSearchTerm('');
     }
-    setIsLoading(true);
 
     try {
       let packsQuery = buildBaseQuery();
@@ -82,7 +79,11 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
         fetchedPacks.push({ id: docSn.id, ...docSn.data() } as NumberPack);
       });
 
-      setAllNumberPacks(prevPacks => isRefresh ? fetchedPacks : [...prevPacks, ...fetchedPacks]);
+      if (isRefresh) {
+        setAllNumberPacks(fetchedPacks);
+      } else {
+        setAllNumberPacks(prevPacks => [...prevPacks, ...fetchedPacks]);
+      }
       
       const newLastVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null;
       setLastVisibleDoc(newLastVisibleDoc);
@@ -99,7 +100,7 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
       setIsLoading(false);
       if (isRefresh) setIsInitialLoading(false);
     }
-  }, [isLoading, buildBaseQuery, toast]);
+  }, [isLoading, buildBaseQuery, toast, setIsLoading, setIsInitialLoading, setAllNumberPacks, setLastVisibleDoc, setHasMore, setSearchTerm]);
 
   useEffect(() => {
     loadNumberPacks(null, true); // Initial fetch
@@ -118,26 +119,34 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
   }, [searchTerm, allNumberPacks]);
   
   useEffect(() => {
+    const currentObserver = observerRef.current;
+    const currentLoadMoreRef = loadMoreRef.current;
+
+    if (isLoading || !hasMore) {
+      if (currentObserver && currentLoadMoreRef) currentObserver.unobserve(currentLoadMoreRef);
+      return;
+    }
+    
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !isLoading && !isInitialLoading && lastVisibleDoc) {
-          loadNumberPacks(lastVisibleDoc);
+        if (entries[0].isIntersecting && lastVisibleDoc) {
+          loadNumberPacks(lastVisibleDoc, false);
         }
       },
       { threshold: 1.0 }
     );
 
-    if (loadMoreRef.current) {
-      observer.observe(loadMoreRef.current);
+    if (currentLoadMoreRef) {
+      observer.observe(currentLoadMoreRef);
     }
     observerRef.current = observer;
 
     return () => {
-      if (observerRef.current) {
-        observerRef.current.disconnect();
+      if (observer && currentLoadMoreRef) {
+        observer.unobserve(currentLoadMoreRef);
       }
     };
-  }, [hasMore, isLoading, isInitialLoading, lastVisibleDoc, loadNumberPacks]);
+  }, [isLoading, hasMore, lastVisibleDoc, loadNumberPacks]);
 
   const handleAddNewPack = () => {
     setEditingNumberPack(null);
@@ -152,6 +161,11 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
   const openDeleteConfirmDialog = (pack: NumberPack) => {
     setPackToDelete(pack);
   };
+
+  const handleDialogClose = useCallback(() => {
+    setIsDialogOpen(false);
+    setEditingNumberPack(null);
+  }, []);
 
   const closeDeleteConfirmDialog = useCallback(() => {
     setPackToDelete(null);
@@ -183,11 +197,6 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
   const onDialogSuccess = useCallback(() => {
     loadNumberPacks(null, true); // Refresh all data
   }, [loadNumberPacks]);
-
-  const handleDialogClose = useCallback(() => {
-    setIsDialogOpen(false);
-    setEditingNumberPack(null);
-  }, []);
   
   const handleRefresh = useCallback(() => {
     loadNumberPacks(null, true);
@@ -227,7 +236,7 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
       </CardHeader>
       <CardContent className="p-0">
         <ScrollArea className="h-[60vh]"> {/* Ensure height is set for ScrollArea */}
-          {isInitialLoading ? (
+          {isInitialLoading && allNumberPacks.length === 0 ? (
             <div className="p-6 space-y-2">
               {[...Array(Math.floor(PAGE_SIZE / 2))].map((_, i) => (
                 <div key={i} className="flex items-center justify-between p-2 border rounded-md">

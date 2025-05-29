@@ -44,14 +44,11 @@ export default function CustomersPage() {
   const loadCustomers = useCallback(async (cursor: QueryDocumentSnapshot<DocumentData> | null = null, isRefresh = false) => {
     if (isLoading && !isRefresh) return;
 
+    setIsLoading(true);
     if (isRefresh) {
       setIsInitialLoading(true);
-      setAllCustomers([]);
-      setLastVisibleDoc(null);
-      setHasMore(true);
       setSearchTerm('');
     }
-    setIsLoading(true);
 
     try {
       let customersQuery = buildBaseQuery();
@@ -67,7 +64,11 @@ export default function CustomersPage() {
         fetchedCustomers.push({ id: docSn.id, ...docSn.data() } as AdminDisplayCustomer);
       });
 
-      setAllCustomers(prevCustomers => isRefresh ? fetchedCustomers : [...prevCustomers, ...fetchedCustomers]);
+      if (isRefresh) {
+        setAllCustomers(fetchedCustomers);
+      } else {
+        setAllCustomers(prevCustomers => [...prevCustomers, ...fetchedCustomers]);
+      }
       
       const newLastVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null;
       setLastVisibleDoc(newLastVisibleDoc);
@@ -85,7 +86,7 @@ export default function CustomersPage() {
       setIsLoading(false);
       if (isRefresh) setIsInitialLoading(false);
     }
-  }, [isLoading, buildBaseQuery, toast]);
+  }, [isLoading, buildBaseQuery, toast, setIsLoading, setIsInitialLoading, setAllCustomers, setLastVisibleDoc, setHasMore, setSearchTerm ]);
 
   useEffect(() => {
     loadCustomers(null, true); // Initial fetch
@@ -96,7 +97,8 @@ export default function CustomersPage() {
     if (searchTerm === '') {
       setFilteredCustomers(allCustomers);
     } else {
-      const filteredData = allCustomers.filter(customer => {
+      const currentCustomers = allCustomers || [];
+      const filteredData = currentCustomers.filter(customer => {
         const nameMatch = customer.name?.toLowerCase().includes(lowercasedFilter);
         const emailMatch = customer.email?.toLowerCase().includes(lowercasedFilter);
         return nameMatch || emailMatch;
@@ -106,26 +108,34 @@ export default function CustomersPage() {
   }, [searchTerm, allCustomers]);
 
   useEffect(() => {
+    const currentObserver = observerRef.current;
+    const currentLoadMoreRef = loadMoreRef.current;
+
+    if (isLoading || !hasMore) {
+      if (currentObserver && currentLoadMoreRef) currentObserver.unobserve(currentLoadMoreRef);
+      return;
+    }
+
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !isLoading && !isInitialLoading && lastVisibleDoc) {
-          loadCustomers(lastVisibleDoc);
+        if (entries[0].isIntersecting && lastVisibleDoc) {
+          loadCustomers(lastVisibleDoc, false);
         }
       },
       { threshold: 1.0 }
     );
 
-    if (loadMoreRef.current) {
-      observer.observe(loadMoreRef.current);
+    if (currentLoadMoreRef) {
+      observer.observe(currentLoadMoreRef);
     }
     observerRef.current = observer;
 
     return () => {
-      if (observerRef.current) {
-        observerRef.current.disconnect();
+      if (observer && currentLoadMoreRef) {
+        observer.unobserve(currentLoadMoreRef);
       }
     };
-  }, [hasMore, isLoading, isInitialLoading, lastVisibleDoc, loadCustomers]);
+  }, [isLoading, hasMore, lastVisibleDoc, loadCustomers]);
 
   const handleRefresh = useCallback(() => {
     loadCustomers(null, true);
@@ -154,7 +164,7 @@ export default function CustomersPage() {
                 <span>Customer List</span>
               </CardTitle>
               <CardDescription>
-                Displaying users from the Firestore 'users' collection.
+                Displaying users from the Firestore 'users' collection. Scroll to load more.
                 An index on 'users' for 'createdAt' (descending) may be required by Firestore.
               </CardDescription>
             </div>
@@ -173,7 +183,7 @@ export default function CustomersPage() {
         </CardHeader>
         <CardContent className="p-0">
             <ScrollArea className="h-[60vh]"> {/* Ensure height is set for ScrollArea */}
-              {isInitialLoading ? (
+              {isInitialLoading && allCustomers.length === 0 ? (
                 <Table>
                   <TableHeader>
                     <TableRow>
