@@ -3,7 +3,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { PageHeader } from '@/components/common/PageHeader';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Users, MoreHorizontal, Search as SearchIcon, PackageSearch, RefreshCcw } from 'lucide-react';
@@ -22,15 +22,18 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 10; // Number of items to fetch per batch
 
 export default function CustomersPage() {
   const [allCustomers, setAllCustomers] = useState<AdminDisplayCustomer[]>([]);
   const [filteredCustomers, setFilteredCustomers] = useState<AdminDisplayCustomer[]>([]);
+  
   const [isLoading, setIsLoading] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
+  
   const [lastVisibleDoc, setLastVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasMore, setHasMore] = useState(true);
+  
   const [searchTerm, setSearchTerm] = useState('');
   const { toast } = useToast();
 
@@ -41,13 +44,16 @@ export default function CustomersPage() {
     return query(collection(db, 'users'), orderBy('createdAt', 'desc'));
   }, []);
 
-  const loadCustomers = useCallback(async (cursor: QueryDocumentSnapshot<DocumentData> | null = null, isRefresh = false) => {
+  const loadCustomers = useCallback(async (
+    cursor: QueryDocumentSnapshot<DocumentData> | null = null,
+    isRefresh = false
+  ) => {
     if (isLoading && !isRefresh) return;
 
     setIsLoading(true);
     if (isRefresh) {
       setIsInitialLoading(true);
-      setSearchTerm('');
+      setSearchTerm(''); // Clear search on refresh
     }
 
     try {
@@ -59,15 +65,15 @@ export default function CustomersPage() {
       }
       
       const documentSnapshots = await getDocs(customersQuery);
-      const fetchedCustomers: AdminDisplayCustomer[] = [];
+      const fetchedCustomersBatch: AdminDisplayCustomer[] = [];
       documentSnapshots.docs.forEach((docSn) => {
-        fetchedCustomers.push({ id: docSn.id, ...docSn.data() } as AdminDisplayCustomer);
+        fetchedCustomersBatch.push({ id: docSn.id, ...docSn.data() } as AdminDisplayCustomer);
       });
 
-      if (isRefresh) {
-        setAllCustomers(fetchedCustomers);
+      if (isRefresh || !cursor) {
+        setAllCustomers(fetchedCustomersBatch);
       } else {
-        setAllCustomers(prevCustomers => [...prevCustomers, ...fetchedCustomers]);
+        setAllCustomers(prevCustomers => [...prevCustomers, ...fetchedCustomersBatch]);
       }
       
       const newLastVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null;
@@ -81,17 +87,23 @@ export default function CustomersPage() {
         description: (error as Error).message || 'Could not load customer data. An index on \'users\' for \'createdAt\' (desc) might be required.',
         variant: 'destructive',
       });
-      setHasMore(false);
+      setHasMore(false); // Stop trying to load more if an error occurs
     } finally {
       setIsLoading(false);
-      if (isRefresh) setIsInitialLoading(false);
+      if (isRefresh) {
+        setIsInitialLoading(false);
+      }
     }
-  }, [isLoading, buildBaseQuery, toast, setIsLoading, setIsInitialLoading, setAllCustomers, setLastVisibleDoc, setHasMore, setSearchTerm ]);
+  }, [toast, buildBaseQuery, isLoading]); // Dependencies for loadCustomers
 
+
+  // Effect for initial load
   useEffect(() => {
-    loadCustomers(null, true); // Initial fetch
-  }, [loadCustomers]);
+    loadCustomers(null, true);
+  }, [loadCustomers]); // loadCustomers is memoized
 
+
+  // Effect for client-side search filtering
   useEffect(() => {
     const lowercasedFilter = searchTerm.toLowerCase();
     if (searchTerm === '') {
@@ -107,41 +119,43 @@ export default function CustomersPage() {
     }
   }, [searchTerm, allCustomers]);
 
+  // Effect for Intersection Observer - infinite scrolling
   useEffect(() => {
-    const currentObserver = observerRef.current;
-    const currentLoadMoreRef = loadMoreRef.current;
+    const currentObserver = observerRef.current; 
 
     if (isLoading || !hasMore) {
-      if (currentObserver && currentLoadMoreRef) currentObserver.unobserve(currentLoadMoreRef);
+      if (currentObserver && loadMoreRef.current) currentObserver.unobserve(loadMoreRef.current);
       return;
     }
 
-    const observer = new IntersectionObserver(
+    const observerInstance = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && lastVisibleDoc) {
+        if (entries[0].isIntersecting && lastVisibleDoc) { 
           loadCustomers(lastVisibleDoc, false);
         }
       },
       { threshold: 1.0 }
     );
 
+    const currentLoadMoreRef = loadMoreRef.current;
     if (currentLoadMoreRef) {
-      observer.observe(currentLoadMoreRef);
+      observerInstance.observe(currentLoadMoreRef);
     }
-    observerRef.current = observer;
+    observerRef.current = observerInstance; 
 
     return () => {
-      if (observer && currentLoadMoreRef) {
-        observer.unobserve(currentLoadMoreRef);
+      if (observerInstance && currentLoadMoreRef) {
+        observerInstance.unobserve(currentLoadMoreRef);
       }
     };
   }, [isLoading, hasMore, lastVisibleDoc, loadCustomers]);
+
 
   const handleRefresh = useCallback(() => {
     loadCustomers(null, true);
   }, [loadCustomers]);
 
-  const displayCustomers = searchTerm ? filteredCustomers : allCustomers;
+  const displayCustomers = filteredCustomers;
 
   return (
     <>
@@ -173,7 +187,7 @@ export default function CustomersPage() {
             <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
             <Input
               type="search"
-              placeholder="Search by email or name..."
+              placeholder="Search by email or name (on loaded data)..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 w-full md:w-1/2 lg:w-1/3"
@@ -183,7 +197,7 @@ export default function CustomersPage() {
         </CardHeader>
         <CardContent className="p-0">
             <ScrollArea className="h-[60vh]"> {/* Ensure height is set for ScrollArea */}
-              {isInitialLoading && allCustomers.length === 0 ? (
+              {isInitialLoading ? (
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -215,6 +229,9 @@ export default function CustomersPage() {
                   <p className="text-muted-foreground">
                     {searchTerm ? 'Try a different search term or clear search.' : "The 'users' collection might be empty or there was an issue fetching data."}
                   </p>
+                   {searchTerm && (
+                    <Button onClick={() => setSearchTerm('')} variant="outline" className="mt-4">Clear Search</Button>
+                  )}
                 </div>
               ) : (
                 <Table>
@@ -272,4 +289,3 @@ export default function CustomersPage() {
     </>
   );
 }
-
