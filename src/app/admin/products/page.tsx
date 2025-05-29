@@ -36,12 +36,13 @@ export interface ProductActiveFilters {
 }
 
 export default function ProductsPage() {
+  console.log("ProductsPage: Rendering"); // TOP LEVEL LOG
+
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryMap, setCategoryMap] = useState<Record<string, string>>({});
   const [isLoadingCategories, setIsLoadingCategories] = useState(true);
   const { toast } = useToast();
   
-  // Filter input states
   const [filterDateFrom, setFilterDateFrom] = useState<Date | undefined>(undefined);
   const [filterDateTo, setFilterDateTo] = useState<Date | undefined>(undefined);
   const [filterStatus, setFilterStatus] = useState<string>('');
@@ -50,7 +51,6 @@ export default function ProductsPage() {
   const [filterMaxPrice, setFilterMaxPrice] = useState<string>('');
   const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
   
-  // Applied filters
   const [activeFilters, setActiveFilters] = useState<ProductActiveFilters>({});
 
   const loadCategories = useCallback(async () => {
@@ -67,8 +67,9 @@ export default function ProductsPage() {
       });
       setCategories(fetchedCategories);
       setCategoryMap(newCategoryMap);
+      console.log("ProductsPage: Categories loaded", fetchedCategories);
     } catch (error) {
-      console.error("Error fetching categories: ", error);
+      console.error("ProductsPage: Error fetching categories: ", error);
       toast({
         title: "Error Fetching Categories",
         description: (error as Error).message || "Could not load categories for product tabs/filters.",
@@ -80,6 +81,7 @@ export default function ProductsPage() {
   }, [toast]);
 
   useEffect(() => {
+    console.log("ProductsPage: useEffect for loadCategories triggered");
     loadCategories();
   }, [loadCategories]);
 
@@ -96,11 +98,13 @@ export default function ProductsPage() {
     const maxPriceNum = parseFloat(filterMaxPrice);
     if (!isNaN(maxPriceNum) && filterMaxPrice.trim() !== '') newActiveFilters.maxPrice = maxPriceNum;
 
+    console.log("ProductsPage: Applying filters", newActiveFilters);
     setActiveFilters(newActiveFilters);
     setIsFilterPopoverOpen(false);
   };
 
   const handleClearFilters = useCallback(() => {
+    console.log("ProductsPage: Clearing filters");
     setFilterDateFrom(undefined);
     setFilterDateTo(undefined);
     setFilterStatus('');
@@ -108,8 +112,8 @@ export default function ProductsPage() {
     setFilterMinPrice('');
     setFilterMaxPrice('');
     setActiveFilters({});
-    setIsFilterPopoverOpen(false); // Close popover if open
-  }, []); // Empty dependency array as setters are stable
+    setIsFilterPopoverOpen(false); 
+  }, []); 
   
   const getActiveFilterCount = () => {
     return Object.values(activeFilters).filter(v => {
@@ -119,9 +123,10 @@ export default function ProductsPage() {
     }).length;
   };
 
-  const handleTabChange = () => {
+  const handleTabChange = useCallback(() => {
+    console.log("ProductsPage: Tab changed, calling handleClearFilters");
     handleClearFilters();
-  };
+  }, [handleClearFilters]);
 
   return (
     <>
@@ -197,7 +202,7 @@ export default function ProductsPage() {
                         </SelectTrigger>
                         <SelectContent>
                           {categories.map((category) => {
-                            if (!category.slug || category.slug.trim() === '') return null; // Skip categories with empty slugs
+                            if (!category.slug || category.slug.trim() === '') return null; 
                             return (
                               <SelectItem key={category.id} value={category.slug}>{category.title}</SelectItem>
                             );
@@ -250,4 +255,3 @@ export default function ProductsPage() {
   );
 }
     
-
