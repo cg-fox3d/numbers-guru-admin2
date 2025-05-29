@@ -9,12 +9,12 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { MoreHorizontal, ShoppingCart, PackageSearch, Search as SearchIcon, RefreshCcw, ChevronLeft, ChevronRight, Eye, Trash2, CheckCircle } from 'lucide-react';
+import { MoreHorizontal, ShoppingCart, PackageSearch, Search as SearchIcon, RefreshCcw, ChevronLeft, ChevronRight, Eye, Trash2, CheckCircle, Filter as FilterIcon, CalendarIcon } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { db } from '@/lib/firebase';
-import { collection, query, orderBy, Timestamp, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData, doc, updateDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
+import { collection, query, orderBy, Timestamp, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData, doc, updateDoc, serverTimestamp, deleteDoc, where, QueryConstraint } from 'firebase/firestore';
 import type { AdminOrder } from '@/types';
-import { format } from 'date-fns';
+import { format, isValid } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import { OrderDetailsDialog } from '@/components/orders/OrderDetailsDialog';
 import {
@@ -27,13 +27,19 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 
 const PAGE_SIZE = 10;
+const ORDER_STATUSES = ["created", "paid", "pending", "processing", "shipped", "delivered", "cancelled", "failed", "refunded", "confirmed"];
+
 
 export default function OrdersPage() {
-  const [allOrders, setAllOrders] = useState<AdminOrder[]>([]);
-  const [ordersOnPage, setOrdersOnPage] = useState<AdminOrder[]>([]);
-  const [filteredOrders, setFilteredOrders] = useState<AdminOrder[]>([]);
+  const [allOrders, setAllOrders] = useState<AdminOrder[]>([]); // Holds data for the current page, before client-side filtering
+  const [ordersOnPage, setOrdersOnPage] = useState<AdminOrder[]>([]); // Holds data after Firestore fetch, before client-side price filter
+  const [filteredOrders, setFilteredOrders] = useState<AdminOrder[]>([]); // Final list for display after all filters
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const { toast } = useToast();
@@ -48,23 +54,55 @@ export default function OrdersPage() {
 
   const [selectedOrderForDetails, setSelectedOrderForDetails] = useState<AdminOrder | null>(null);
   const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
-  const [orderToModify, setOrderToModify] = useState<AdminOrder | null>(null); // For delete or status update
+  const [orderToModify, setOrderToModify] = useState<AdminOrder | null>(null);
   const [isModifyLoading, setIsModifyLoading] = useState(false);
 
+  // Filter states
+  const [filterDateFrom, setFilterDateFrom] = useState<Date | undefined>(undefined);
+  const [filterDateTo, setFilterDateTo] = useState<Date | undefined>(undefined);
+  const [filterStatus, setFilterStatus] = useState<string>('');
+  const [filterMinAmount, setFilterMinAmount] = useState<string>('');
+  const [filterMaxAmount, setFilterMaxAmount] = useState<string>('');
+  const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
+
+  const [activeFilters, setActiveFilters] = useState<{
+    dateFrom?: Date;
+    dateTo?: Date;
+    status?: string;
+    minAmount?: number;
+    maxAmount?: number;
+  }>({});
 
   useEffect(() => {
     pageStartCursorsRef.current = pageStartCursors;
   }, [pageStartCursors]);
 
   const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null) => {
-    let q = query(collection(db, 'orders'), orderBy('orderDate', 'desc'));
-    if (cursor) {
-      q = query(q, startAfter(cursor), limit(PAGE_SIZE + 1));
-    } else {
-      q = query(q, limit(PAGE_SIZE + 1));
+    const constraints: QueryConstraint[] = [];
+
+    if (activeFilters.status) {
+      constraints.push(where('orderStatus', '==', activeFilters.status));
     }
-    return q;
-  }, []);
+    if (activeFilters.dateFrom) {
+      constraints.push(where('orderDate', '>=', Timestamp.fromDate(activeFilters.dateFrom)));
+    }
+    if (activeFilters.dateTo) {
+      // To include the whole 'to' day, set time to end of day
+      const toDateEnd = new Date(activeFilters.dateTo);
+      toDateEnd.setHours(23, 59, 59, 999);
+      constraints.push(where('orderDate', '<=', Timestamp.fromDate(toDateEnd)));
+    }
+
+    // Main ordering
+    constraints.push(orderBy('orderDate', 'desc'));
+    
+    if (cursor) {
+      constraints.push(startAfter(cursor));
+    }
+    constraints.push(limit(PAGE_SIZE + 1));
+
+    return query(collection(db, 'orders'), ...constraints);
+  }, [activeFilters]);
 
   const loadOrders = useCallback(async (pageIdxToLoad: number, options: { isRefresh?: boolean } = {}) => {
     setIsLoading(true);
@@ -93,9 +131,10 @@ export default function OrdersPage() {
       documentSnapshots.docs.slice(0, PAGE_SIZE).forEach((docSn) => {
         fetchedOrders.push({ id: docSn.id, ...docSn.data() } as AdminOrder);
       });
-      setOrdersOnPage(fetchedOrders);
-      setAllOrders(fetchedOrders); // Keep a copy of current page data for filtering
-
+      
+      setOrdersOnPage(fetchedOrders); // Set data before client-side price filtering
+      // setAllOrders is for search, setOrdersOnPage is for price filter + display
+      
       const newFirstVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null;
       setFirstVisibleDoc(newFirstVisibleDoc);
       
@@ -108,8 +147,7 @@ export default function OrdersPage() {
       setHasNextPage(newHasNextPage);
 
       if (isActualRefresh) {
-         const firstDocOfPage0 = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null;
-         setPageStartCursors(firstDocOfPage0 ? [null, firstDocOfPage0] : [null]);
+         setPageStartCursors(newFirstVisibleDoc ? [null, newFirstVisibleDoc] : [null]);
       } else if (pageIdxToLoad >= currentCursors.length && newFirstVisibleDoc && queryCursor === lastVisibleDoc) {
         setPageStartCursors(prev => [...prev, newFirstVisibleDoc]);
       }
@@ -118,42 +156,57 @@ export default function OrdersPage() {
       console.error("Error fetching orders: ", error);
       toast({
         title: 'Error Fetching Orders',
-        description: (error as Error).message || 'Could not load orders. An index on \'orders\' for \'orderDate\' (desc) might be required.',
+        description: (error as Error).message || 'Could not load orders. Ensure Firestore indexes are set up for status/date filters.',
         variant: 'destructive',
       });
       setOrdersOnPage([]);
-      setAllOrders([]);
       setHasNextPage(false);
     } finally {
       setIsLoading(false);
     }
-  }, [toast, buildPageQuery]);
+  }, [toast, buildPageQuery, lastVisibleDoc, setPageStartCursors, setIsLoading, setOrdersOnPage, setHasNextPage, setLastVisibleDoc, setSearchTerm, setFirstVisibleDoc]);
 
   useEffect(() => {
     loadOrders(currentPageIndex, {isRefresh: currentPageIndex === 0 && pageStartCursorsRef.current.length <=1 });
-  }, [currentPageIndex, loadOrders]);
+  }, [currentPageIndex, loadOrders, activeFilters]); // Re-fetch if activeFilters change
 
+  // Client-side filtering (search and price range)
   useEffect(() => {
-    const lowercasedFilter = searchTerm.toLowerCase();
-    const currentOrders = allOrders || [];
+    let tempOrders = ordersOnPage || [];
 
+    // Price Range Filter (Client-side)
+    const min = activeFilters.minAmount;
+    const max = activeFilters.maxAmount;
+    if (typeof min === 'number' || typeof max === 'number') {
+      tempOrders = tempOrders.filter(order => {
+        const amount = order.amount;
+        const meetsMin = typeof min === 'number' ? amount >= min : true;
+        const meetsMax = typeof max === 'number' ? amount <= max : true;
+        return meetsMin && meetsMax;
+      });
+    }
+    setAllOrders(tempOrders); // Set for search filtering
+
+    // Search Filter
+    const lowercasedFilter = searchTerm.toLowerCase();
     if (searchTerm === '') {
-      setFilteredOrders(currentOrders);
+      setFilteredOrders(tempOrders);
     } else {
-      const filteredData = currentOrders.filter(order =>
+      const filteredData = tempOrders.filter(order =>
         order.orderId.toLowerCase().includes(lowercasedFilter) ||
         order.customerName.toLowerCase().includes(lowercasedFilter) ||
         order.customerEmail.toLowerCase().includes(lowercasedFilter)
       );
       setFilteredOrders(filteredData);
     }
-  }, [searchTerm, allOrders]);
+  }, [searchTerm, ordersOnPage, activeFilters]);
+
 
   const handleRefresh = useCallback(() => {
     if (currentPageIndex === 0) {
         loadOrders(0, { isRefresh: true });
     } else {
-        setCurrentPageIndex(0); 
+        setCurrentPageIndex(0); // This will trigger useEffect due to currentPageIndex change
     }
   }, [loadOrders, currentPageIndex]);
 
@@ -191,7 +244,7 @@ export default function OrdersPage() {
         title: 'Status Updated',
         description: `Order ${orderId} marked as delivered.`,
       });
-      loadOrders(currentPageIndex, { isRefresh: true }); // Refresh current page
+      loadOrders(currentPageIndex, { isRefresh: true });
     } catch (error) {
       console.error("Error updating order status: ", error);
       toast({
@@ -208,9 +261,9 @@ export default function OrdersPage() {
     setOrderToModify(order);
   };
 
-  const closeDeleteConfirmDialog = () => {
+  const closeDeleteConfirmDialog = useCallback(() => {
     setOrderToModify(null);
-  };
+  }, []);
 
   const handleDeleteOrder = async () => {
     if (!orderToModify || !orderToModify.id) return;
@@ -221,11 +274,11 @@ export default function OrdersPage() {
         title: 'Order Deleted',
         description: `Order "${orderToModify.orderId}" has been successfully deleted.`,
       });
-      const isLastItemOnPage = ordersOnPage.length === 1;
+      const isLastItemOnPage = (ordersOnPage || []).length === 1;
       if (isLastItemOnPage && currentPageIndex > 0) {
-        setCurrentPageIndex(prev => prev -1); // Go to prev page if last item deleted
+        setCurrentPageIndex(prev => prev -1); 
       } else {
-        loadOrders(currentPageIndex, { isRefresh: true }); // Refresh current page or page 0
+        loadOrders(currentPageIndex, { isRefresh: true });
       }
     } catch (error) {
       console.error("Error deleting order: ", error);
@@ -247,16 +300,46 @@ export default function OrdersPage() {
 
   const getStatusVariant = (status: string): "default" | "secondary" | "destructive" | "outline" => {
     const lowerStatus = status.toLowerCase();
-    if (lowerStatus === 'paid' || lowerStatus === 'delivered' || lowerStatus === 'completed' || lowerStatus === 'shipped' || lowerStatus === 'created') {
+    if (['paid', 'delivered', 'completed', 'shipped', 'created'].includes(lowerStatus)) {
       return 'default';
     }
-    if (lowerStatus === 'pending' || lowerStatus === 'processing' || lowerStatus === 'confirmed') {
+    if (['pending', 'processing', 'confirmed'].includes(lowerStatus)) {
       return 'secondary';
     }
-    if (lowerStatus === 'cancelled' || lowerStatus === 'failed' || lowerStatus === 'refunded') {
+    if (['cancelled', 'failed', 'refunded'].includes(lowerStatus)) {
       return 'destructive';
     }
     return 'outline';
+  };
+
+  const handleApplyFilters = () => {
+    const newActiveFilters: typeof activeFilters = {};
+    if (filterDateFrom) newActiveFilters.dateFrom = filterDateFrom;
+    if (filterDateTo) newActiveFilters.dateTo = filterDateTo;
+    if (filterStatus) newActiveFilters.status = filterStatus;
+    
+    const minAmountNum = parseFloat(filterMinAmount);
+    if (!isNaN(minAmountNum)) newActiveFilters.minAmount = minAmountNum;
+    
+    const maxAmountNum = parseFloat(filterMaxAmount);
+    if (!isNaN(maxAmountNum)) newActiveFilters.maxAmount = maxAmountNum;
+
+    setActiveFilters(newActiveFilters);
+    setCurrentPageIndex(0); // Reset to first page when filters change
+    setIsFilterPopoverOpen(false);
+    // loadOrders will be called by useEffect due to activeFilters or currentPageIndex change
+  };
+
+  const handleClearFilters = () => {
+    setFilterDateFrom(undefined);
+    setFilterDateTo(undefined);
+    setFilterStatus('');
+    setFilterMinAmount('');
+    setFilterMaxAmount('');
+    setActiveFilters({});
+    setCurrentPageIndex(0);
+    setIsFilterPopoverOpen(false);
+    // loadOrders will be called by useEffect
   };
 
   return (
@@ -265,10 +348,111 @@ export default function OrdersPage() {
         title="Orders Management"
         description="View and manage customer orders."
         actions={
-          <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading || isModifyLoading}>
-            <RefreshCcw className="h-4 w-4" />
-            <span className="sr-only">Refresh</span>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Popover open={isFilterPopoverOpen} onOpenChange={setIsFilterPopoverOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" disabled={isLoading || isModifyLoading}>
+                  <FilterIcon className="mr-2 h-4 w-4" />
+                  Filters {Object.keys(activeFilters).length > 0 && `(${Object.keys(activeFilters).length})`}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80" align="end">
+                <div className="grid gap-4">
+                  <div className="space-y-2">
+                    <h4 className="font-medium leading-none">Filters</h4>
+                    <p className="text-sm text-muted-foreground">
+                      Apply filters to narrow down orders.
+                    </p>
+                  </div>
+                  <div className="grid gap-3">
+                    <div className="grid grid-cols-2 gap-2">
+                        <div>
+                            <Label htmlFor="dateFrom">From Date</Label>
+                            <Popover>
+                                <PopoverTrigger asChild>
+                                <Button
+                                    id="dateFrom"
+                                    variant={"outline"}
+                                    className="w-full justify-start text-left font-normal"
+                                >
+                                    <CalendarIcon className="mr-2 h-4 w-4" />
+                                    {filterDateFrom ? format(filterDateFrom, "PPP") : <span>Pick a date</span>}
+                                </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0">
+                                <Calendar
+                                    mode="single"
+                                    selected={filterDateFrom}
+                                    onSelect={setFilterDateFrom}
+                                    initialFocus
+                                />
+                                </PopoverContent>
+                            </Popover>
+                        </div>
+                        <div>
+                            <Label htmlFor="dateTo">To Date</Label>
+                             <Popover>
+                                <PopoverTrigger asChild>
+                                <Button
+                                    id="dateTo"
+                                    variant={"outline"}
+                                    className="w-full justify-start text-left font-normal"
+                                >
+                                    <CalendarIcon className="mr-2 h-4 w-4" />
+                                    {filterDateTo ? format(filterDateTo, "PPP") : <span>Pick a date</span>}
+                                </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0">
+                                <Calendar
+                                    mode="single"
+                                    selected={filterDateTo}
+                                    onSelect={setFilterDateTo}
+                                    disabled={(date) =>
+                                        filterDateFrom ? date < filterDateFrom : false
+                                      }
+                                    initialFocus
+                                />
+                                </PopoverContent>
+                            </Popover>
+                        </div>
+                    </div>
+                    <div>
+                      <Label htmlFor="status">Order Status</Label>
+                      <Select value={filterStatus} onValueChange={setFilterStatus}>
+                        <SelectTrigger id="status">
+                          <SelectValue placeholder="Select status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">All Statuses</SelectItem>
+                          {ORDER_STATUSES.map(status => (
+                            <SelectItem key={status} value={status} className="capitalize">{status}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                        <div>
+                            <Label htmlFor="minAmount">Min Amount (₹)</Label>
+                            <Input id="minAmount" type="number" placeholder="e.g., 100" value={filterMinAmount} onChange={e => setFilterMinAmount(e.target.value)} />
+                        </div>
+                        <div>
+                            <Label htmlFor="maxAmount">Max Amount (₹)</Label>
+                            <Input id="maxAmount" type="number" placeholder="e.g., 5000" value={filterMaxAmount} onChange={e => setFilterMaxAmount(e.target.value)} />
+                        </div>
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="ghost" onClick={handleClearFilters}>Clear</Button>
+                    <Button onClick={handleApplyFilters} className="bg-primary hover:bg-primary/90">Apply Filters</Button>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+            <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading || isModifyLoading}>
+              <RefreshCcw className="h-4 w-4" />
+              <span className="sr-only">Refresh</span>
+            </Button>
+          </div>
         }
       />
       <Card className="shadow-lg">
@@ -280,7 +464,7 @@ export default function OrdersPage() {
                 <span>Orders List</span>
               </CardTitle>
               <CardDescription>
-                Browse customer orders. An index on 'orders' for 'orderDate' (desc) might be required by Firestore.
+                Browse customer orders. Indexes on 'orderDate' (desc), 'orderStatus', and 'amount' might be required.
               </CardDescription>
             </div>
           </div>
@@ -326,13 +510,16 @@ export default function OrdersPage() {
             <div className="flex flex-col items-center justify-center text-center p-10 min-h-[300px]">
               <PackageSearch className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-xl font-semibold">
-                {searchTerm ? 'No Orders Match Your Search' : 
+                {searchTerm || Object.keys(activeFilters).length > 0 ? 'No Orders Match Your Search/Filters' : 
                  (ordersOnPage || []).length === 0 ? 'No Orders Found' : 'No Orders Match Your Search'}
               </h3>
               <p className="text-muted-foreground">
-                {searchTerm ? 'Try a different search term or clear search.' : 
+                {searchTerm || Object.keys(activeFilters).length > 0 ? 'Try different criteria or clear search/filters.' : 
                  (ordersOnPage || []).length === 0 ? "The 'orders' collection might be empty or there was an issue fetching data." : 'Adjust your search.'}
               </p>
+              {(searchTerm || Object.keys(activeFilters).length > 0) && (
+                  <Button onClick={() => { setSearchTerm(''); handleClearFilters(); }} variant="outline" className="mt-4">Clear Search & Filters</Button>
+              )}
             </div>
           ) : (
             <Table>
@@ -355,7 +542,7 @@ export default function OrdersPage() {
                         <div className="text-xs text-muted-foreground">{order.customerEmail}</div>
                     </TableCell>
                     <TableCell>
-                      {order.orderDate instanceof Timestamp
+                      {order.orderDate instanceof Timestamp && isValid(order.orderDate.toDate())
                         ? format(order.orderDate.toDate(), 'PPp')
                         : typeof order.orderDate === 'string'
                           ? order.orderDate
@@ -460,3 +647,4 @@ export default function OrdersPage() {
     </>
   );
 }
+
