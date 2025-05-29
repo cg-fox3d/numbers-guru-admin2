@@ -109,14 +109,14 @@ export interface Transaction {
   orderId: string;
   amount: number;
   currency: string;
-  status: string; // e.g., "captured", "failed"
-  method?: string; // e.g., "wallet", "card"
-  email?: string; // Customer's email
+  status: string; 
+  method?: string; 
+  email?: string; 
   userId?: string;
-  provider?: string; // e.g., "razorpay"
+  provider?: string; 
   razorpaySignature?: string;
   verified?: boolean;
-  createdAt: Timestamp; // Will be used as "Transaction Date"
+  createdAt: Timestamp; 
   updatedAt?: Timestamp;
 }
 
@@ -127,11 +127,11 @@ export interface Refund {
   orderId: string;
   amount: number;
   currency: string;
-  status: string;
-  reason?: string;
-  refundDate: Timestamp;
-  customerEmail?: string;
-  createdAt?: Timestamp;
+  status: string; // e.g., "refunded", "processing", "failed"
+  receipt?: string;
+  createdAt: Timestamp; // Use this as the primary "Refund Date" for sorting/display
+  updatedAt?: Timestamp;
+  // customerEmail can be fetched via join/lookup if needed, or denormalized
 }
 
 export interface DashboardStats {
@@ -140,3 +140,4 @@ export interface DashboardStats {
   ordersThisMonth: number;
   productsInStock: number;
 }
+

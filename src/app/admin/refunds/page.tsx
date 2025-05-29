@@ -37,7 +37,7 @@ export default function RefundsPage() {
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null): QueryConstraint[] => {
-    const constraints: QueryConstraint[] = [orderBy('refundDate', 'desc')];
+    const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')]; // Order by 'createdAt' as refund date
     if (cursor) {
       constraints.push(startAfter(cursor));
     }
@@ -49,19 +49,27 @@ export default function RefundsPage() {
     cursor: QueryDocumentSnapshot<DocumentData> | null = null,
     isRefresh = false
   ) => {
-    if (isLoading) return;
+    if (isLoading && !isRefresh) {
+        console.log("[RefundsPage] fetchRefunds: Already loading and not a refresh, returning.");
+        return;
+    }
+    
     setIsLoading(true);
     if (isRefresh) {
+      console.log("[RefundsPage] fetchRefunds: Refresh triggered. Setting isInitialLoading=true.");
       setIsInitialLoading(true);
-      setSearchTerm('');
+      setSearchTerm(''); 
     }
 
     try {
       const queryConstraints = buildPageQuery(cursor);
       const refundsQuery = query(collection(db, 'refunds'), ...queryConstraints);
+      console.log("[RefundsPage] fetchRefunds: Executing Firestore query with constraints:", queryConstraints);
       
       const documentSnapshots = await getDocs(refundsQuery);
       const fetchedRefundsBatch: Refund[] = [];
+      console.log(`[RefundsPage] fetchRefunds: Firestore query returned ${documentSnapshots.docs.length} documents.`);
+      
       documentSnapshots.docs.forEach((docSn) => {
         fetchedRefundsBatch.push({ id: docSn.id, ...docSn.data() } as Refund);
       });
@@ -69,43 +77,55 @@ export default function RefundsPage() {
       if (isRefresh || !cursor) {
         setAllRefunds(fetchedRefundsBatch);
         setFirstVisibleDoc(documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null);
+        console.log("[RefundsPage] fetchRefunds: Initial load/refresh. All refunds set:", fetchedRefundsBatch);
       } else {
-        setAllRefunds(prev => [...prev, ...fetchedRefundsBatch]);
+        setAllRefunds(prev => {
+          const newRefunds = [...prev, ...fetchedRefundsBatch];
+          console.log(`[RefundsPage] fetchRefunds: Appending refunds. Prev count: ${prev.length}, New batch count: ${fetchedRefundsBatch.length}, Total: ${newRefunds.length}`);
+          return newRefunds;
+        });
       }
       
       const newLastVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null;
       setLastVisibleDoc(newLastVisibleDoc);
       setHasMore(documentSnapshots.docs.length === PAGE_SIZE);
+      console.log(`[RefundsPage] fetchRefunds: Updated lastVisibleDoc: ${newLastVisibleDoc ? newLastVisibleDoc.id : 'null'}, hasMore: ${documentSnapshots.docs.length === PAGE_SIZE}`);
 
     } catch (error) {
-      console.error("Error fetching refunds: ", error);
+      console.error("[RefundsPage] fetchRefunds: Error fetching refunds: ", error);
       toast({
         title: 'Error Fetching Refunds',
-        description: (error as Error).message || 'Could not load refunds. Check Firestore indexes for "refunds" collection, ordered by "refundDate" (desc).',
+        description: (error as Error).message || 'Could not load refunds. Check Firestore indexes for "refunds" collection, ordered by "createdAt" (desc).',
         variant: 'destructive',
       });
       setHasMore(false);
     } finally {
       setIsLoading(false);
-      if (isRefresh) setIsInitialLoading(false);
+      if (isRefresh) {
+        setIsInitialLoading(false);
+        console.log("[RefundsPage] fetchRefunds: Refresh finished. isInitialLoading=false, isLoading=false.");
+      } else {
+        console.log("[RefundsPage] fetchRefunds: Load more finished. isLoading=false.");
+      }
     }
-  }, [toast, buildPageQuery, isLoading, setIsLoading, setIsInitialLoading, setAllRefunds, setLastVisibleDoc, setFirstVisibleDoc, setHasMore, setSearchTerm]);
+  }, [toast, buildPageQuery]); // Dependencies for fetchRefunds
 
   useEffect(() => {
+    console.log("[RefundsPage] Initial useEffect: Triggering fetchRefunds for initial load/refresh.");
     fetchRefunds(null, true);
   }, [fetchRefunds]);
 
   useEffect(() => {
     const lowercasedSearch = searchTerm.toLowerCase();
+    const currentRefunds = allRefunds || [];
     if (searchTerm === '') {
-      setFilteredRefunds(allRefunds || []);
+      setFilteredRefunds(currentRefunds);
     } else {
-      const currentRefunds = allRefunds || [];
       const searchedData = currentRefunds.filter(refund =>
         refund.refundId.toLowerCase().includes(lowercasedSearch) ||
         refund.paymentId.toLowerCase().includes(lowercasedSearch) ||
-        refund.orderId.toLowerCase().includes(lowercasedSearch) ||
-        refund.customerEmail?.toLowerCase().includes(lowercasedSearch)
+        refund.orderId.toLowerCase().includes(lowercasedSearch)
+        // Add customerEmail search if it becomes part of the Refund type and data
       );
       setFilteredRefunds(searchedData);
     }
@@ -115,14 +135,21 @@ export default function RefundsPage() {
     const currentObserver = observerRef.current;
     const currentLoadMoreRef = loadMoreRef.current;
 
-    if (isLoading || !hasMore || !currentLoadMoreRef) {
-      if (currentObserver && currentLoadMoreRef) currentObserver.unobserve(currentLoadMoreRef);
+    if (!currentLoadMoreRef) {
+      console.log("[RefundsPage] IntersectionObserver useEffect: loadMoreRef.current is null, returning.");
       return;
     }
+    if (isLoading || !hasMore) {
+      console.log(`[RefundsPage] IntersectionObserver useEffect: Not observing. isLoading: ${isLoading}, hasMore: ${hasMore}`);
+      if (currentObserver) currentObserver.unobserve(currentLoadMoreRef);
+      return;
+    }
+    console.log("[RefundsPage] IntersectionObserver useEffect: Setting up observer.");
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && lastVisibleDoc) {
+        if (entries[0].isIntersecting && lastVisibleDoc && !isLoading && hasMore) {
+          console.log("[RefundsPage] IntersectionObserver: Sentinel intersected! Loading more refunds.");
           fetchRefunds(lastVisibleDoc);
         }
       },
@@ -133,6 +160,7 @@ export default function RefundsPage() {
     observerRef.current = observer;
 
     return () => {
+      console.log("[RefundsPage] IntersectionObserver useEffect: Cleaning up observer.");
       if (observer && currentLoadMoreRef) {
         observer.unobserve(currentLoadMoreRef);
       }
@@ -140,6 +168,7 @@ export default function RefundsPage() {
   }, [isLoading, hasMore, lastVisibleDoc, fetchRefunds]);
 
   const handleRefresh = useCallback(() => {
+    console.log("[RefundsPage] handleRefresh: Called.");
     fetchRefunds(null, true);
   }, [fetchRefunds]);
 
@@ -150,7 +179,7 @@ export default function RefundsPage() {
 
   const getStatusVariant = (status?: string): "default" | "secondary" | "destructive" | "outline" => {
     const lowerStatus = status?.toLowerCase();
-    if (['succeeded', 'completed'].includes(lowerStatus || '')) return 'default';
+    if (['refunded', 'succeeded', 'completed'].includes(lowerStatus || '')) return 'default';
     if (['pending', 'processing'].includes(lowerStatus || '')) return 'secondary';
     if (['failed', 'cancelled'].includes(lowerStatus || '')) return 'destructive';
     return 'outline';
@@ -162,7 +191,7 @@ export default function RefundsPage() {
     <>
       <PageHeader
         title="Refund Log"
-        description="View refund records from the 'refunds' collection. Check console for index errors."
+        description="View refund records from the 'refunds' collection. Ordered by 'createdAt' (desc). Check console for index errors."
         actions={
           <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading || isInitialLoading}>
             <RefreshCcw className="h-4 w-4" />
@@ -180,7 +209,7 @@ export default function RefundsPage() {
               </CardTitle>
               <CardDescription>
                 Browse refund records. Scroll to load more.
-                An index on 'refunds' for 'refundDate' (descending) may be required by Firestore.
+                An index on 'refunds' for 'createdAt' (descending) may be required by Firestore.
               </CardDescription>
             </div>
           </div>
@@ -188,7 +217,7 @@ export default function RefundsPage() {
             <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
             <Input
               type="search"
-              placeholder="Search by Refund ID, Payment ID, Order ID, or Customer Email..."
+              placeholder="Search by Refund ID, Payment ID, or Order ID..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 w-full md:w-1/2 lg:w-1/3"
@@ -198,26 +227,26 @@ export default function RefundsPage() {
         </CardHeader>
         <CardContent className="p-0">
           <ScrollArea className="h-[60vh]">
-            {isInitialLoading ? (
+            {isInitialLoading && displayRefunds.length === 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Refund ID</TableHead>
+                    <TableHead>Payment ID</TableHead>
                     <TableHead>Order ID</TableHead>
                     <TableHead>Amount</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Reason</TableHead>
-                    <TableHead>Date</TableHead>
+                    <TableHead>Date (Created At)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {[...Array(Math.floor(PAGE_SIZE / 2))].map((_, i) => ( 
                     <TableRow key={`skeleton-${i}`}>
                       <TableCell><Skeleton className="h-5 w-32" /></TableCell>
+                      <TableCell><Skeleton className="h-5 w-32" /></TableCell>
                       <TableCell><Skeleton className="h-5 w-24" /></TableCell>
                       <TableCell><Skeleton className="h-5 w-20" /></TableCell>
                       <TableCell><Skeleton className="h-6 w-24" /></TableCell>
-                      <TableCell><Skeleton className="h-5 w-28" /></TableCell>
                       <TableCell><Skeleton className="h-5 w-40" /></TableCell>
                     </TableRow>
                   ))}
@@ -238,17 +267,18 @@ export default function RefundsPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Refund ID</TableHead>
+                    <TableHead>Payment ID</TableHead>
                     <TableHead>Order ID</TableHead>
                     <TableHead>Amount</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Reason</TableHead>
-                    <TableHead>Date</TableHead>
+                    <TableHead>Date (Created At)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {displayRefunds.map((refund) => (
                     <TableRow key={refund.id}>
                       <TableCell className="font-mono text-xs">{refund.refundId}</TableCell>
+                      <TableCell className="font-mono text-xs">{refund.paymentId}</TableCell>
                       <TableCell className="font-mono text-xs">{refund.orderId}</TableCell>
                       <TableCell>{formatCurrency(refund.amount, refund.currency)}</TableCell>
                       <TableCell>
@@ -256,12 +286,11 @@ export default function RefundsPage() {
                           {refund.status || 'N/A'}
                         </Badge>
                       </TableCell>
-                      <TableCell>{refund.reason || 'N/A'}</TableCell>
                       <TableCell>
-                        {refund.refundDate instanceof Timestamp && isValid(refund.refundDate.toDate())
-                          ? format(refund.refundDate.toDate(), 'PPp')
-                          : typeof refund.refundDate === 'string'
-                            ? refund.refundDate
+                        {refund.createdAt instanceof Timestamp && isValid(refund.createdAt.toDate())
+                          ? format(refund.createdAt.toDate(), 'PPp')
+                          : typeof refund.createdAt === 'string'
+                            ? refund.createdAt
                             : 'N/A'}
                       </TableCell>
                     </TableRow>
