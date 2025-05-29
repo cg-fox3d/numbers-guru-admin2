@@ -3,7 +3,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { PageHeader } from '@/components/common/PageHeader';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -47,9 +47,12 @@ interface ActiveFilters {
 export default function OrdersPage() {
   const [allOrders, setAllOrders] = useState<AdminOrder[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<AdminOrder[]>([]);
+  
   const [isLoading, setIsLoading] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
+  
   const [lastVisibleDoc, setLastVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [firstVisibleDoc, setFirstVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null); // For potential future 'prev' logic, not actively used in current infinite scroll
   const [hasMore, setHasMore] = useState(true);
   
   const [searchTerm, setSearchTerm] = useState('');
@@ -63,22 +66,27 @@ export default function OrdersPage() {
   const [orderToModify, setOrderToModify] = useState<AdminOrder | null>(null);
   const [isModifyLoading, setIsModifyLoading] = useState(false);
 
+  // Filter input states
   const [filterDateFrom, setFilterDateFrom] = useState<Date | undefined>(undefined);
   const [filterDateTo, setFilterDateTo] = useState<Date | undefined>(undefined);
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [filterMinAmount, setFilterMinAmount] = useState<string>('');
   const [filterMaxAmount, setFilterMaxAmount] = useState<string>('');
   const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
+  
+  // Applied filters
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>({});
 
-  const buildBaseQuery = useCallback((currentActiveFilters: ActiveFilters, cursor: QueryDocumentSnapshot<DocumentData> | null = null) => {
+  const buildBaseQuery = useCallback((currentActiveFilters: ActiveFilters, currentCursor: QueryDocumentSnapshot<DocumentData> | null = null) => {
     const constraints: QueryConstraint[] = [];
 
     if (currentActiveFilters.status) {
       constraints.push(where('orderStatus', '==', currentActiveFilters.status));
     }
     if (currentActiveFilters.dateFrom) {
-      constraints.push(where('orderDate', '>=', Timestamp.fromDate(currentActiveFilters.dateFrom)));
+      const fromDateStart = new Date(currentActiveFilters.dateFrom);
+      fromDateStart.setHours(0,0,0,0);
+      constraints.push(where('orderDate', '>=', Timestamp.fromDate(fromDateStart)));
     }
     if (currentActiveFilters.dateTo) {
       const toDateEnd = new Date(currentActiveFilters.dateTo);
@@ -86,50 +94,73 @@ export default function OrdersPage() {
       constraints.push(where('orderDate', '<=', Timestamp.fromDate(toDateEnd)));
     }
     
+    // IMPORTANT: If you filter by status OR date, Firestore might require specific composite indexes
+    // that include orderDate DESC as the last part of the index.
+    // e.g., (orderStatus ASC, orderDate DESC) or (orderDate DESC)
     constraints.push(orderBy('orderDate', 'desc'));
 
-    if (cursor) {
-      constraints.push(startAfter(cursor));
+    if (currentCursor) {
+      constraints.push(startAfter(currentCursor));
     }
     constraints.push(limit(PAGE_SIZE));
     
     return query(collection(db, 'orders'), ...constraints);
-  }, []);
+  }, []); // Empty dependency array as it only uses its arguments
 
-  const fetchOrders = useCallback(async (cursor: QueryDocumentSnapshot<DocumentData> | null = null, isRefreshOrFilterChange = false) => {
-    if (isLoading) return; 
+  const fetchOrders = useCallback(async (
+    cursor: QueryDocumentSnapshot<DocumentData> | null = null,
+    isRefreshOrFilterChange = false,
+    filtersForThisFetch: ActiveFilters // Explicitly pass current filters
+  ) => {
+    if (isLoading && !isRefreshOrFilterChange) { // Prevent concurrent non-refresh fetches
+        return;
+    }
     
     setIsLoading(true);
     if (isRefreshOrFilterChange) {
       setIsInitialLoading(true);
-      setAllOrders([]); 
-      setLastVisibleDoc(null);
-      setHasMore(true);
     }
 
     try {
-      const ordersQuery = buildBaseQuery(activeFilters, cursor);
+      if (isRefreshOrFilterChange) { // Resetting for refresh or filter change
+        setAllOrders([]); 
+        setLastVisibleDoc(null);
+        setFirstVisibleDoc(null); 
+        setHasMore(true); 
+      }
+
+      const ordersQuery = buildBaseQuery(filtersForThisFetch, cursor);
       const documentSnapshots = await getDocs(ordersQuery);
       
-      let fetchedOrders: AdminOrder[] = [];
+      let fetchedOrdersBatch: AdminOrder[] = [];
       documentSnapshots.docs.forEach((docSn) => {
-        fetchedOrders.push({ id: docSn.id, ...docSn.data() } as AdminOrder);
+        fetchedOrdersBatch.push({ id: docSn.id, ...docSn.data() } as AdminOrder);
       });
 
-      // Client-side filtering for amount
-      if (typeof activeFilters.minAmount === 'number' || typeof activeFilters.maxAmount === 'number') {
-        fetchedOrders = fetchedOrders.filter(order => {
+      // Client-side filtering for amount on the current batch
+      if (typeof filtersForThisFetch.minAmount === 'number' || typeof filtersForThisFetch.maxAmount === 'number') {
+        fetchedOrdersBatch = fetchedOrdersBatch.filter(order => {
           const amount = order.amount;
-          const meetsMin = typeof activeFilters.minAmount === 'number' ? amount >= activeFilters.minAmount : true;
-          const meetsMax = typeof activeFilters.maxAmount === 'number' ? amount <= activeFilters.maxAmount : true;
+          const meetsMin = typeof filtersForThisFetch.minAmount === 'number' ? amount >= filtersForThisFetch.minAmount : true;
+          const meetsMax = typeof filtersForThisFetch.maxAmount === 'number' ? amount <= filtersForThisFetch.maxAmount : true;
           return meetsMin && meetsMax;
         });
       }
       
-      setAllOrders(prevOrders => isRefreshOrFilterChange ? fetchedOrders : [...prevOrders, ...fetchedOrders]);
+      if (isRefreshOrFilterChange || !cursor) { // If initial load/refresh
+        setAllOrders(fetchedOrdersBatch);
+      } else { // If loading more
+        setAllOrders(prevOrders => [...prevOrders, ...fetchedOrdersBatch]);
+      }
       
       const newLastVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null;
       setLastVisibleDoc(newLastVisibleDoc);
+      
+      const newFirstVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null;
+      if (isRefreshOrFilterChange || !cursor) {
+        setFirstVisibleDoc(newFirstVisibleDoc);
+      }
+
       setHasMore(documentSnapshots.docs.length === PAGE_SIZE);
 
     } catch (error) {
@@ -139,49 +170,72 @@ export default function OrdersPage() {
         description: (error as Error).message || 'Could not load orders. Check console for details & ensure Firestore indexes are set up for current filters.',
         variant: 'destructive',
       });
-      setHasMore(false); // Stop trying to load more if there's an error
+      setHasMore(false);
     } finally {
       setIsLoading(false);
-      if (isRefreshOrFilterChange) setIsInitialLoading(false);
-    }
-  }, [isLoading, buildBaseQuery, activeFilters, toast]);
-
-
-  useEffect(() => {
-    // This effect handles initial load and re-fetching when filters change
-    fetchOrders(null, true); 
-  }, [activeFilters, fetchOrders]); // fetchOrders is memoized, so this runs when activeFilters changes
-
-  useEffect(() => {
-    // Intersection Observer for infinite scrolling
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasMore && !isLoading && !isInitialLoading) {
-          fetchOrders(lastVisibleDoc);
-        }
-      },
-      { threshold: 1.0 }
-    );
-
-    if (loadMoreRef.current) {
-      observer.observe(loadMoreRef.current);
-    }
-    observerRef.current = observer;
-
-    return () => {
-      if (observerRef.current) {
-        observerRef.current.disconnect();
+      if (isRefreshOrFilterChange) {
+        setIsInitialLoading(false);
       }
-    };
-  }, [hasMore, isLoading, isInitialLoading, lastVisibleDoc, fetchOrders]);
+    }
+  },
+  [ // Dependencies of fetchOrders
+    toast,
+    buildBaseQuery, 
+    // All setters are stable
+    setIsLoading,
+    setIsInitialLoading,
+    setAllOrders,
+    setLastVisibleDoc,
+    setFirstVisibleDoc,
+    setHasMore,
+  ]
+);
 
+// Effect for initial load AND when activeFilters change
+useEffect(() => {
+  fetchOrders(null, true, activeFilters); // isRefreshOrFilterChange = true
+}, [activeFilters, fetchOrders]); // fetchOrders is stable, this runs on activeFilters reference change
+
+// Effect for Intersection Observer - infinite scrolling
+useEffect(() => {
+  const currentObserver = observerRef.current; // Capture for cleanup
+
+  if (isLoading || !hasMore) {
+    if (currentObserver) currentObserver.disconnect();
+    return;
+  }
+
+  const observerInstance = new IntersectionObserver(
+    (entries) => {
+      if (entries[0].isIntersecting && lastVisibleDoc) { 
+        fetchOrders(lastVisibleDoc, false, activeFilters); // Pass current activeFilters
+      }
+    },
+    { threshold: 1.0 }
+  );
+
+  const currentLoadMoreRef = loadMoreRef.current;
+  if (currentLoadMoreRef) {
+    observerInstance.observe(currentLoadMoreRef);
+  }
+  observerRef.current = observerInstance; // Store the new observer
+
+  return () => {
+    if (observerInstance) {
+      observerInstance.disconnect();
+    }
+  };
+}, [isLoading, hasMore, lastVisibleDoc, fetchOrders, activeFilters]);
+
+
+  // Client-side search filtering
   useEffect(() => {
-    // Client-side search filtering
     const lowercasedSearch = searchTerm.toLowerCase();
     if (searchTerm === '') {
-      setFilteredOrders(allOrders);
+      setFilteredOrders(allOrders || []);
     } else {
-      const searchedData = allOrders.filter(order =>
+      const currentOrders = allOrders || [];
+      const searchedData = currentOrders.filter(order =>
         order.orderId.toLowerCase().includes(lowercasedSearch) ||
         order.customerName.toLowerCase().includes(lowercasedSearch) ||
         order.customerEmail.toLowerCase().includes(lowercasedSearch)
@@ -192,12 +246,8 @@ export default function OrdersPage() {
 
   const handleRefresh = useCallback(() => {
     setSearchTerm(''); 
-    // fetchOrders(null, true) will be triggered by the activeFilters useEffect if needed,
-    // or we can explicitly call it to ensure a fresh load from page 0 based on current filters.
-    // For simplicity, we'll rely on the activeFilters useEffect, but if filters are empty,
-    // this might not re-trigger. So, an explicit call is safer.
-    fetchOrders(null, true);
-  }, [fetchOrders, setSearchTerm]);
+    fetchOrders(null, true, activeFilters); // Refresh with current active filters
+  }, [fetchOrders, activeFilters]);
 
   const openDetailsDialog = useCallback((order: AdminOrder) => {
     setSelectedOrderForDetails(order);
@@ -221,7 +271,7 @@ export default function OrdersPage() {
         title: 'Status Updated',
         description: `Order ${orderId} marked as delivered.`,
       });
-      // Optimistically update local state
+      // Optimistically update local state to avoid full refresh if not necessary
       setAllOrders(prevOrders => prevOrders.map(o => 
         o.id === orderId ? {...o, orderStatus: 'delivered', updatedAt: Timestamp.now()} : o
       ));
@@ -256,6 +306,10 @@ export default function OrdersPage() {
       });
       // Optimistically update local state
       setAllOrders(prevOrders => prevOrders.filter(o => o.id !== orderToModify.id));
+      // If the deleted item was the last one visible from a larger potential set,
+      // it might be good to try and fetch more if hasMore was true,
+      // or simply rely on user action to load more if needed.
+      // For now, simple optimistic removal.
     } catch (error) {
       console.error("Error deleting order: ", error);
       toast({
@@ -269,7 +323,8 @@ export default function OrdersPage() {
     }
   }, [orderToModify, toast, closeDeleteConfirmDialog]);
 
-  const formatCurrency = (amount: number, currencyCode: string = "INR") => {
+  const formatCurrency = (amount?: number, currencyCode: string = "INR") => {
+    if (amount === undefined || amount === null) return 'N/A';
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: currencyCode }).format(amount);
   };
 
@@ -288,10 +343,10 @@ export default function OrdersPage() {
     if (filterStatus) newActiveFilters.status = filterStatus;
     
     const minAmountNum = parseFloat(filterMinAmount);
-    if (!isNaN(minAmountNum)) newActiveFilters.minAmount = minAmountNum;
+    if (!isNaN(minAmountNum) && filterMinAmount.trim() !== '') newActiveFilters.minAmount = minAmountNum;
     
     const maxAmountNum = parseFloat(filterMaxAmount);
-    if (!isNaN(maxAmountNum)) newActiveFilters.maxAmount = maxAmountNum;
+    if (!isNaN(maxAmountNum) && filterMaxAmount.trim() !== '') newActiveFilters.maxAmount = maxAmountNum;
 
     setActiveFilters(newActiveFilters); // This will trigger the useEffect for fetchOrders
     setIsFilterPopoverOpen(false);
@@ -307,17 +362,21 @@ export default function OrdersPage() {
     setIsFilterPopoverOpen(false);
   };
 
-  const displayOrders = searchTerm ? filteredOrders : allOrders;
+  const displayOrders = searchTerm ? filteredOrders : (allOrders || []); // Ensure displayOrders is always an array
 
   const getActiveFilterCount = () => {
-    return Object.values(activeFilters).filter(v => v !== undefined && v !== '' && (Array.isArray(v) ? v.length > 0 : true)).length;
+    return Object.values(activeFilters).filter(v => {
+      if (v === undefined || v === '') return false;
+      if (typeof v === 'number' && isNaN(v)) return false; // Exclude NaN if numbers are parsed
+      return true;
+    }).length;
   }
 
   return (
     <>
       <PageHeader
         title="Orders Management"
-        description="View and manage customer orders. PLEASE CHECK BROWSER CONSOLE FOR FIRESTORE INDEX ERRORS."
+        description="View, filter, and manage customer orders. CHECK BROWSER CONSOLE FOR FIRESTORE INDEX ERRORS."
         actions={
           <div className="flex items-center gap-2">
             <Popover open={isFilterPopoverOpen} onOpenChange={setIsFilterPopoverOpen}>
@@ -373,7 +432,7 @@ export default function OrdersPage() {
                             <SelectValue placeholder="All Statuses" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">All Statuses</SelectItem>
+                          {/* Removed SelectItem for "All Statuses" as placeholder handles it */}
                           {ORDER_STATUSES.map(status => (
                             <SelectItem key={status} value={status} className="capitalize">{status}</SelectItem>
                           ))}
@@ -398,7 +457,7 @@ export default function OrdersPage() {
                 </div>
               </PopoverContent>
             </Popover>
-            <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isInitialLoading || isLoading || isModifyLoading}>
+            <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading || isModifyLoading}>
               <RefreshCcw className="h-4 w-4" />
               <span className="sr-only">Refresh</span>
             </Button>
@@ -414,7 +473,7 @@ export default function OrdersPage() {
                 <span>Orders List</span>
               </CardTitle>
               <CardDescription>
-                Browse customer orders. Indexes on 'orderDate' (desc), 'orderStatus', and combinations might be required by Firestore.
+                Browse customer orders. Scroll to load more. Indexes on 'orderDate' (desc), 'orderStatus', and combinations might be required by Firestore.
                 PLEASE CHECK BROWSER CONSOLE FOR FIRESTORE INDEX ERRORS.
               </CardDescription>
             </div>
@@ -427,7 +486,7 @@ export default function OrdersPage() {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 w-full md:w-1/2 lg:w-1/3"
-              disabled={isInitialLoading && allOrders.length === 0 && !Object.values(activeFilters).some(Boolean)}
+              disabled={isInitialLoading && (allOrders || []).length === 0 && !Object.values(activeFilters).some(Boolean)}
             />
           </div>
         </CardHeader>
@@ -498,7 +557,11 @@ export default function OrdersPage() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => openDetailsDialog(order)}><Eye className="mr-2 h-4 w-4" /> View Details</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleUpdateStatus(order.id)} disabled={order.orderStatus.toLowerCase() === 'delivered' || isModifyLoading}><CheckCircle className="mr-2 h-4 w-4" /> Mark as Delivered</DropdownMenuItem>
+                            <DropdownMenuItem 
+                                onClick={() => handleUpdateStatus(order.id)} 
+                                disabled={order.orderStatus.toLowerCase() === 'delivered' || isModifyLoading}>
+                                    <CheckCircle className="mr-2 h-4 w-4" /> Mark as Delivered
+                            </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={() => openDeleteConfirmDialog(order)} className="text-destructive focus:text-destructive focus:bg-destructive/10" disabled={isModifyLoading}><Trash2 className="mr-2 h-4 w-4" /> Delete Order</DropdownMenuItem>
                           </DropdownMenuContent>
@@ -521,7 +584,7 @@ export default function OrdersPage() {
         <OrderDetailsDialog isOpen={isDetailsDialogOpen} onClose={closeDetailsDialog} order={selectedOrderForDetails} />
       )}
 
-      {orderToModify && !isDetailsDialogOpen && ( // Ensure delete dialog doesn't open if details dialog is open
+      {orderToModify && !isDetailsDialogOpen && ( 
         <AlertDialog open={!!orderToModify} onOpenChange={(open) => !open && closeDeleteConfirmDialog()}>
           <AlertDialogContent>
             <AlertDialogHeader>
@@ -538,4 +601,3 @@ export default function OrdersPage() {
     </>
   );
 }
-
