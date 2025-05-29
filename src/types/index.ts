@@ -28,7 +28,7 @@ export interface VipNumber {
   imageHint?: string;
   isVip?: boolean;
   sumOfDigits?: string; // Numerology sum (single digit)
-  totalDigits?: string; // Sum of all digits
+  totalDigits?: string; // Sum of all digits in the number
   createdAt?: Timestamp; 
   updatedAt?: Timestamp;
 }
@@ -84,17 +84,23 @@ export interface AdminOrder {
   orderDate: Timestamp;
   amount: number;
   currency: string;
-  orderStatus: string; // e.g., "created", "processing", "shipped"
-  paymentStatus: string; // e.g., "pending", "paid"
+  orderStatus: string; 
+  paymentStatus: string; 
   items: string; // Summary string of items
   itemCount: number;
-  createdAt?: Timestamp; // Firestore server timestamp
-  updatedAt?: Timestamp; // Firestore server timestamp
-  // You can add other fields from your structure as needed
-  // notes?: { email?: string; itemCount?: number; itemDetails?: string; name?: string; selectedOriginalVipNumberIds?: string[] };
-  // userId?: string;
-  // paymentId?: string;
-  // receipt?: string;
+  createdAt?: Timestamp; 
+  updatedAt?: Timestamp;
+  notes?: {
+    email?: string;
+    itemCount?: number;
+    itemDetails?: string;
+    name?: string;
+    selectedOriginalVipNumberIds?: string[];
+    [key: string]: any; // Allow other potential fields in notes
+  };
+  userId?: string;
+  paymentId?: string;
+  receipt?: string;
 }
 
 export interface DashboardStats {
@@ -103,4 +109,3 @@ export interface DashboardStats {
   ordersThisMonth: number;
   productsInStock: number;
 }
-

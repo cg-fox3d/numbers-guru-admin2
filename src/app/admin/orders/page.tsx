@@ -8,21 +8,32 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { MoreHorizontal, ShoppingCart, PackageSearch, Search as SearchIcon, RefreshCcw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import { MoreHorizontal, ShoppingCart, PackageSearch, Search as SearchIcon, RefreshCcw, ChevronLeft, ChevronRight, Eye, Trash2, CheckCircle } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { db } from '@/lib/firebase';
-import { collection, query, orderBy, Timestamp, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
+import { collection, query, orderBy, Timestamp, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData, doc, updateDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import type { AdminOrder } from '@/types';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
+import { OrderDetailsDialog } from '@/components/orders/OrderDetailsDialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const PAGE_SIZE = 10;
 
 export default function OrdersPage() {
-  const [allOrders, setAllOrders] = useState<AdminOrder[]>([]); // Stores all orders fetched for current view/search
-  const [ordersOnPage, setOrdersOnPage] = useState<AdminOrder[]>([]); // Data for the current page
-  const [filteredOrders, setFilteredOrders] = useState<AdminOrder[]>([]); // Data after search filter
+  const [allOrders, setAllOrders] = useState<AdminOrder[]>([]);
+  const [ordersOnPage, setOrdersOnPage] = useState<AdminOrder[]>([]);
+  const [filteredOrders, setFilteredOrders] = useState<AdminOrder[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const { toast } = useToast();
@@ -34,6 +45,12 @@ export default function OrdersPage() {
   const [lastVisibleDoc, setLastVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [firstVisibleDoc, setFirstVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasNextPage, setHasNextPage] = useState(false);
+
+  const [selectedOrderForDetails, setSelectedOrderForDetails] = useState<AdminOrder | null>(null);
+  const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
+  const [orderToModify, setOrderToModify] = useState<AdminOrder | null>(null); // For delete or status update
+  const [isModifyLoading, setIsModifyLoading] = useState(false);
+
 
   useEffect(() => {
     pageStartCursorsRef.current = pageStartCursors;
@@ -77,6 +94,7 @@ export default function OrdersPage() {
         fetchedOrders.push({ id: docSn.id, ...docSn.data() } as AdminOrder);
       });
       setOrdersOnPage(fetchedOrders);
+      setAllOrders(fetchedOrders); // Keep a copy of current page data for filtering
 
       const newFirstVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null;
       setFirstVisibleDoc(newFirstVisibleDoc);
@@ -90,7 +108,8 @@ export default function OrdersPage() {
       setHasNextPage(newHasNextPage);
 
       if (isActualRefresh) {
-        setPageStartCursors(newFirstVisibleDoc ? [null, newFirstVisibleDoc] : [null]);
+         const firstDocOfPage0 = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null;
+         setPageStartCursors(firstDocOfPage0 ? [null, firstDocOfPage0] : [null]);
       } else if (pageIdxToLoad >= currentCursors.length && newFirstVisibleDoc && queryCursor === lastVisibleDoc) {
         setPageStartCursors(prev => [...prev, newFirstVisibleDoc]);
       }
@@ -103,11 +122,12 @@ export default function OrdersPage() {
         variant: 'destructive',
       });
       setOrdersOnPage([]);
+      setAllOrders([]);
       setHasNextPage(false);
     } finally {
       setIsLoading(false);
     }
-  }, [toast, buildPageQuery, setIsLoading, setOrdersOnPage, setHasNextPage, setLastVisibleDoc, setSearchTerm, setPageStartCursors, setFirstVisibleDoc]);
+  }, [toast, buildPageQuery]);
 
   useEffect(() => {
     loadOrders(currentPageIndex, {isRefresh: currentPageIndex === 0 && pageStartCursorsRef.current.length <=1 });
@@ -115,7 +135,7 @@ export default function OrdersPage() {
 
   useEffect(() => {
     const lowercasedFilter = searchTerm.toLowerCase();
-    const currentOrders = ordersOnPage || [];
+    const currentOrders = allOrders || [];
 
     if (searchTerm === '') {
       setFilteredOrders(currentOrders);
@@ -127,7 +147,7 @@ export default function OrdersPage() {
       );
       setFilteredOrders(filteredData);
     }
-  }, [searchTerm, ordersOnPage]);
+  }, [searchTerm, allOrders]);
 
   const handleRefresh = useCallback(() => {
     if (currentPageIndex === 0) {
@@ -135,8 +155,7 @@ export default function OrdersPage() {
     } else {
         setCurrentPageIndex(0); 
     }
-  }, [loadOrders, currentPageIndex, setCurrentPageIndex]);
-
+  }, [loadOrders, currentPageIndex]);
 
   const handleNextPage = () => {
     if (hasNextPage) {
@@ -149,6 +168,78 @@ export default function OrdersPage() {
       setCurrentPageIndex(prev => prev - 1);
     }
   };
+
+  const openDetailsDialog = (order: AdminOrder) => {
+    setSelectedOrderForDetails(order);
+    setIsDetailsDialogOpen(true);
+  };
+
+  const closeDetailsDialog = useCallback(() => {
+    setIsDetailsDialogOpen(false);
+    setSelectedOrderForDetails(null);
+  }, []);
+
+  const handleUpdateStatus = async (orderId: string) => {
+    setIsModifyLoading(true);
+    try {
+      const orderRef = doc(db, 'orders', orderId);
+      await updateDoc(orderRef, {
+        orderStatus: 'delivered',
+        updatedAt: serverTimestamp()
+      });
+      toast({
+        title: 'Status Updated',
+        description: `Order ${orderId} marked as delivered.`,
+      });
+      loadOrders(currentPageIndex, { isRefresh: true }); // Refresh current page
+    } catch (error) {
+      console.error("Error updating order status: ", error);
+      toast({
+        title: 'Update Failed',
+        description: (error as Error).message || 'Could not update order status.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsModifyLoading(false);
+    }
+  };
+  
+  const openDeleteConfirmDialog = (order: AdminOrder) => {
+    setOrderToModify(order);
+  };
+
+  const closeDeleteConfirmDialog = () => {
+    setOrderToModify(null);
+  };
+
+  const handleDeleteOrder = async () => {
+    if (!orderToModify || !orderToModify.id) return;
+    setIsModifyLoading(true);
+    try {
+      await deleteDoc(doc(db, 'orders', orderToModify.id));
+      toast({
+        title: 'Order Deleted',
+        description: `Order "${orderToModify.orderId}" has been successfully deleted.`,
+      });
+      const isLastItemOnPage = ordersOnPage.length === 1;
+      if (isLastItemOnPage && currentPageIndex > 0) {
+        setCurrentPageIndex(prev => prev -1); // Go to prev page if last item deleted
+      } else {
+        loadOrders(currentPageIndex, { isRefresh: true }); // Refresh current page or page 0
+      }
+    } catch (error) {
+      console.error("Error deleting order: ", error);
+      toast({
+        title: 'Deletion Failed',
+        description: (error as Error).message || 'Could not delete the order.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsModifyLoading(false);
+      closeDeleteConfirmDialog();
+    }
+  };
+
 
   const formatCurrency = (amount: number, currencyCode: string = "INR") => {
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: currencyCode }).format(amount);
@@ -174,7 +265,7 @@ export default function OrdersPage() {
         title="Orders Management"
         description="View and manage customer orders."
         actions={
-          <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading}>
+          <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading || isModifyLoading}>
             <RefreshCcw className="h-4 w-4" />
             <span className="sr-only">Refresh</span>
           </Button>
@@ -279,14 +370,28 @@ export default function OrdersPage() {
                     <TableCell className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0" disabled>
+                          <Button variant="ghost" className="h-8 w-8 p-0" disabled={isModifyLoading}>
                             <span className="sr-only">Open menu</span>
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem disabled>View Details</DropdownMenuItem>
-                          <DropdownMenuItem disabled>Update Status</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => openDetailsDialog(order)}>
+                            <Eye className="mr-2 h-4 w-4" /> View Details
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            onClick={() => handleUpdateStatus(order.id)}
+                            disabled={order.orderStatus.toLowerCase() === 'delivered'}
+                          >
+                            <CheckCircle className="mr-2 h-4 w-4" /> Mark as Delivered
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem 
+                            onClick={() => openDeleteConfirmDialog(order)} 
+                            className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" /> Delete Order
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -306,7 +411,7 @@ export default function OrdersPage() {
                         variant="outline" 
                         size="sm" 
                         onClick={handlePrevPage} 
-                        disabled={currentPageIndex === 0 || isLoading}
+                        disabled={currentPageIndex === 0 || isLoading || isModifyLoading}
                     >
                         <ChevronLeft className="h-4 w-4 mr-1" /> Previous
                     </Button>
@@ -314,7 +419,7 @@ export default function OrdersPage() {
                         variant="outline" 
                         size="sm" 
                         onClick={handleNextPage} 
-                        disabled={!hasNextPage || isLoading}
+                        disabled={!hasNextPage || isLoading || isModifyLoading}
                     >
                         Next <ChevronRight className="h-4 w-4 ml-1" />
                     </Button>
@@ -322,6 +427,36 @@ export default function OrdersPage() {
             </CardFooter>
         )}
       </Card>
+
+      {isDetailsDialogOpen && selectedOrderForDetails && (
+        <OrderDetailsDialog
+          isOpen={isDetailsDialogOpen}
+          onClose={closeDetailsDialog}
+          order={selectedOrderForDetails}
+        />
+      )}
+
+      {orderToModify && (
+        <AlertDialog open={!!orderToModify && !selectedOrderForDetails} onOpenChange={(open) => !open && closeDeleteConfirmDialog()}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. This will permanently delete the order
+                "{orderToModify.orderId}".
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={closeDeleteConfirmDialog} disabled={isModifyLoading}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction onClick={handleDeleteOrder} disabled={isModifyLoading} className="bg-destructive hover:bg-destructive/90">
+                {isModifyLoading ? "Deleting..." : "Yes, delete order"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </>
   );
 }
