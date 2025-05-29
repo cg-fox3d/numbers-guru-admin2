@@ -27,7 +27,7 @@ export default function TransactionsPage() {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   
   const [lastVisibleDoc, setLastVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
-  const [firstVisibleDoc, setFirstVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [firstVisibleDoc, setFirstVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null); // For potential 'prev' logic if needed
   const [hasMore, setHasMore] = useState(true);
   
   const [searchTerm, setSearchTerm] = useState('');
@@ -37,7 +37,7 @@ export default function TransactionsPage() {
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null): QueryConstraint[] => {
-    const constraints: QueryConstraint[] = [orderBy('transactionDate', 'desc')];
+    const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')]; // Order by 'createdAt' as transaction date
     if (cursor) {
       constraints.push(startAfter(cursor));
     }
@@ -49,16 +49,17 @@ export default function TransactionsPage() {
     cursor: QueryDocumentSnapshot<DocumentData> | null = null,
     isRefresh = false
   ) => {
-    if (isLoading) return;
+    if (isLoading && !isRefresh) return; // Prevent concurrent non-refresh fetches
+    
     setIsLoading(true);
     if (isRefresh) {
       setIsInitialLoading(true);
-      setSearchTerm('');
+      setSearchTerm(''); 
     }
 
     try {
       const queryConstraints = buildPageQuery(cursor);
-      const transactionsQuery = query(collection(db, 'payments'), ...queryConstraints);
+      const transactionsQuery = query(collection(db, 'payments'), ...queryConstraints); // Query 'payments' collection
       
       const documentSnapshots = await getDocs(transactionsQuery);
       const fetchedTransactionsBatch: Transaction[] = [];
@@ -66,10 +67,10 @@ export default function TransactionsPage() {
         fetchedTransactionsBatch.push({ id: docSn.id, ...docSn.data() } as Transaction);
       });
       
-      if (isRefresh || !cursor) {
+      if (isRefresh || !cursor) { // Initial load or refresh
         setAllTransactions(fetchedTransactionsBatch);
         setFirstVisibleDoc(documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null);
-      } else {
+      } else { // Loading more
         setAllTransactions(prev => [...prev, ...fetchedTransactionsBatch]);
       }
       
@@ -81,7 +82,7 @@ export default function TransactionsPage() {
       console.error("Error fetching transactions: ", error);
       toast({
         title: 'Error Fetching Transactions',
-        description: (error as Error).message || 'Could not load transactions. Check Firestore indexes for "payments" collection, ordered by "transactionDate" (desc).',
+        description: (error as Error).message || 'Could not load transactions. Check Firestore indexes for "payments" collection, ordered by "createdAt" (desc).',
         variant: 'destructive',
       });
       setHasMore(false);
@@ -89,12 +90,14 @@ export default function TransactionsPage() {
       setIsLoading(false);
       if (isRefresh) setIsInitialLoading(false);
     }
-  }, [toast, buildPageQuery, isLoading, setIsLoading, setIsInitialLoading, setAllTransactions, setLastVisibleDoc, setFirstVisibleDoc, setHasMore, setSearchTerm]);
+  }, [toast, buildPageQuery, isLoading]); // Dependencies for fetchTransactions
 
+  // Initial load
   useEffect(() => {
     fetchTransactions(null, true);
   }, [fetchTransactions]);
 
+  // Client-side search filtering
   useEffect(() => {
     const lowercasedSearch = searchTerm.toLowerCase();
     if (searchTerm === '') {
@@ -104,12 +107,13 @@ export default function TransactionsPage() {
       const searchedData = currentTransactions.filter(tx =>
         tx.paymentId.toLowerCase().includes(lowercasedSearch) ||
         tx.orderId.toLowerCase().includes(lowercasedSearch) ||
-        tx.customerEmail?.toLowerCase().includes(lowercasedSearch)
+        tx.email?.toLowerCase().includes(lowercasedSearch)
       );
       setFilteredTransactions(searchedData);
     }
   }, [searchTerm, allTransactions]);
 
+  // Intersection Observer for infinite scroll
   useEffect(() => {
     const currentObserver = observerRef.current;
     const currentLoadMoreRef = loadMoreRef.current;
@@ -121,7 +125,7 @@ export default function TransactionsPage() {
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && lastVisibleDoc) {
+        if (entries[0].isIntersecting && lastVisibleDoc && !isLoading && hasMore) { // Ensure not already loading and hasMore is true
           fetchTransactions(lastVisibleDoc);
         }
       },
@@ -149,7 +153,7 @@ export default function TransactionsPage() {
 
   const getStatusVariant = (status?: string): "default" | "secondary" | "destructive" | "outline" => {
     const lowerStatus = status?.toLowerCase();
-    if (['succeeded', 'paid', 'completed'].includes(lowerStatus || '')) return 'default';
+    if (['succeeded', 'paid', 'completed', 'captured'].includes(lowerStatus || '')) return 'default';
     if (['pending', 'processing'].includes(lowerStatus || '')) return 'secondary';
     if (['failed', 'cancelled', 'disputed'].includes(lowerStatus || '')) return 'destructive';
     return 'outline';
@@ -161,7 +165,7 @@ export default function TransactionsPage() {
     <>
       <PageHeader
         title="Transaction Log"
-        description="View payment transactions from the 'payments' collection. Check console for index errors."
+        description="View payment transactions from the 'payments' collection. Ordered by 'createdAt' (desc)."
         actions={
           <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading || isInitialLoading}>
             <RefreshCcw className="h-4 w-4" />
@@ -179,7 +183,7 @@ export default function TransactionsPage() {
               </CardTitle>
               <CardDescription>
                 Browse payment transactions. Scroll to load more.
-                An index on 'payments' for 'transactionDate' (descending) may be required by Firestore.
+                An index on 'payments' for 'createdAt' (descending) may be required by Firestore. Check console.
               </CardDescription>
             </div>
           </div>
@@ -196,8 +200,8 @@ export default function TransactionsPage() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <ScrollArea className="h-[60vh]">
-            {isInitialLoading ? (
+          <ScrollArea className="h-[60vh]"> {/* Ensure ScrollArea has a defined height */}
+            {isInitialLoading && displayTransactions.length === 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -241,7 +245,8 @@ export default function TransactionsPage() {
                     <TableHead>Amount</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Method</TableHead>
-                    <TableHead>Date</TableHead>
+                    <TableHead>Customer Email</TableHead>
+                    <TableHead>Date (Created At)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -256,11 +261,12 @@ export default function TransactionsPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className="capitalize">{tx.method || 'N/A'}</TableCell>
+                      <TableCell>{tx.email || 'N/A'}</TableCell>
                       <TableCell>
-                        {tx.transactionDate instanceof Timestamp && isValid(tx.transactionDate.toDate())
-                          ? format(tx.transactionDate.toDate(), 'PPp')
-                          : typeof tx.transactionDate === 'string'
-                            ? tx.transactionDate
+                        {tx.createdAt instanceof Timestamp && isValid(tx.createdAt.toDate())
+                          ? format(tx.createdAt.toDate(), 'PPp')
+                          : typeof tx.createdAt === 'string' // Fallback if somehow it's a string
+                            ? tx.createdAt
                             : 'N/A'}
                       </TableCell>
                     </TableRow>

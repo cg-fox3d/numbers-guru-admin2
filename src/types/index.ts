@@ -27,8 +27,8 @@ export interface VipNumber {
   description?: string;
   imageHint?: string;
   isVip?: boolean;
-  sumOfDigits?: string; // Numerology sum (single digit)
-  totalDigits?: string; // Sum of all digits in the number
+  sumOfDigits?: string; 
+  totalDigits?: string; 
   createdAt?: Timestamp; 
   updatedAt?: Timestamp;
 }
@@ -76,8 +76,8 @@ export interface AdminDisplayCustomer {
 }
 
 export interface AdminOrder {
-  id: string; // Firestore document ID
-  orderId: string; // Your custom order identifier
+  id: string; 
+  orderId: string; 
   customerName: string;
   customerEmail: string;
   customerId: string;
@@ -86,7 +86,7 @@ export interface AdminOrder {
   currency: string;
   orderStatus: string; 
   paymentStatus: string; 
-  items: string; // Summary string of items
+  items: string; 
   itemCount: number;
   createdAt?: Timestamp; 
   updatedAt?: Timestamp;
@@ -96,7 +96,7 @@ export interface AdminOrder {
     itemDetails?: string;
     name?: string;
     selectedOriginalVipNumberIds?: string[];
-    [key: string]: any; // Allow other potential fields in notes
+    [key: string]: any; 
   };
   userId?: string;
   paymentId?: string;
@@ -109,11 +109,15 @@ export interface Transaction {
   orderId: string;
   amount: number;
   currency: string;
-  status: string;
-  method?: string;
-  transactionDate: Timestamp;
-  customerEmail?: string;
-  createdAt?: Timestamp;
+  status: string; // e.g., "captured", "failed"
+  method?: string; // e.g., "wallet", "card"
+  email?: string; // Customer's email
+  userId?: string;
+  provider?: string; // e.g., "razorpay"
+  razorpaySignature?: string;
+  verified?: boolean;
+  createdAt: Timestamp; // Will be used as "Transaction Date"
+  updatedAt?: Timestamp;
 }
 
 export interface Refund {
@@ -136,4 +140,3 @@ export interface DashboardStats {
   ordersThisMonth: number;
   productsInStock: number;
 }
-
