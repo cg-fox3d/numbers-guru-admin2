@@ -3,19 +3,31 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { PageHeader } from '@/components/common/PageHeader';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ListChecks, PackageSearch, Search as SearchIcon, RefreshCcw } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { MoreHorizontal, Eye, Trash2, ListChecks, PackageSearch, Search as SearchIcon, RefreshCcw } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
-import { collection, query, orderBy, Timestamp, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData, QueryConstraint } from 'firebase/firestore';
+import { collection, query, orderBy, Timestamp, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData, QueryConstraint, doc, deleteDoc } from 'firebase/firestore';
 import type { Transaction } from '@/types';
 import { format, isValid } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
+import { TransactionDetailsDialog } from '@/components/transactions/TransactionDetailsDialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const PAGE_SIZE = 10;
 
@@ -27,7 +39,7 @@ export default function TransactionsPage() {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   
   const [lastVisibleDoc, setLastVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
-  const [firstVisibleDoc, setFirstVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null); // For potential 'prev' logic if needed
+  const [firstVisibleDoc, setFirstVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasMore, setHasMore] = useState(true);
   
   const [searchTerm, setSearchTerm] = useState('');
@@ -36,8 +48,13 @@ export default function TransactionsPage() {
   const observerRef = useRef<IntersectionObserver | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
+  const [selectedTransactionForDetails, setSelectedTransactionForDetails] = useState<Transaction | null>(null);
+  const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
+  const [transactionToDelete, setTransactionToDelete] = useState<Transaction | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null): QueryConstraint[] => {
-    const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')]; // Order by 'createdAt' as transaction date
+    const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')];
     if (cursor) {
       constraints.push(startAfter(cursor));
     }
@@ -49,17 +66,20 @@ export default function TransactionsPage() {
     cursor: QueryDocumentSnapshot<DocumentData> | null = null,
     isRefresh = false
   ) => {
-    if (isLoading && !isRefresh) return; // Prevent concurrent non-refresh fetches
+    if (isLoading && !isRefresh) return;
     
     setIsLoading(true);
     if (isRefresh) {
       setIsInitialLoading(true);
       setSearchTerm(''); 
+      setFirstVisibleDoc(null);
+      setLastVisibleDoc(null);
+      setHasMore(true);
     }
 
     try {
       const queryConstraints = buildPageQuery(cursor);
-      const transactionsQuery = query(collection(db, 'payments'), ...queryConstraints); // Query 'payments' collection
+      const transactionsQuery = query(collection(db, 'payments'), ...queryConstraints);
       
       const documentSnapshots = await getDocs(transactionsQuery);
       const fetchedTransactionsBatch: Transaction[] = [];
@@ -67,10 +87,12 @@ export default function TransactionsPage() {
         fetchedTransactionsBatch.push({ id: docSn.id, ...docSn.data() } as Transaction);
       });
       
-      if (isRefresh || !cursor) { // Initial load or refresh
+      if (isRefresh || !cursor) {
         setAllTransactions(fetchedTransactionsBatch);
-        setFirstVisibleDoc(documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null);
-      } else { // Loading more
+        if (documentSnapshots.docs.length > 0) {
+          setFirstVisibleDoc(documentSnapshots.docs[0]);
+        }
+      } else {
         setAllTransactions(prev => [...prev, ...fetchedTransactionsBatch]);
       }
       
@@ -90,14 +112,12 @@ export default function TransactionsPage() {
       setIsLoading(false);
       if (isRefresh) setIsInitialLoading(false);
     }
-  }, [toast, buildPageQuery, isLoading]); // Dependencies for fetchTransactions
+  }, [toast, buildPageQuery, setIsLoading, setIsInitialLoading, setAllTransactions, setLastVisibleDoc, setFirstVisibleDoc, setHasMore, setSearchTerm ]);
 
-  // Initial load
   useEffect(() => {
     fetchTransactions(null, true);
   }, [fetchTransactions]);
 
-  // Client-side search filtering
   useEffect(() => {
     const lowercasedSearch = searchTerm.toLowerCase();
     if (searchTerm === '') {
@@ -113,7 +133,6 @@ export default function TransactionsPage() {
     }
   }, [searchTerm, allTransactions]);
 
-  // Intersection Observer for infinite scroll
   useEffect(() => {
     const currentObserver = observerRef.current;
     const currentLoadMoreRef = loadMoreRef.current;
@@ -125,7 +144,7 @@ export default function TransactionsPage() {
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && lastVisibleDoc && !isLoading && hasMore) { // Ensure not already loading and hasMore is true
+        if (entries[0].isIntersecting && lastVisibleDoc && !isLoading && hasMore) {
           fetchTransactions(lastVisibleDoc);
         }
       },
@@ -145,6 +164,49 @@ export default function TransactionsPage() {
   const handleRefresh = useCallback(() => {
     fetchTransactions(null, true);
   }, [fetchTransactions]);
+
+  const openDetailsDialog = useCallback((transaction: Transaction) => {
+    setSelectedTransactionForDetails(transaction);
+    setIsDetailsDialogOpen(true);
+  }, []);
+
+  const closeDetailsDialog = useCallback(() => {
+    setIsDetailsDialogOpen(false);
+    setSelectedTransactionForDetails(null);
+  }, []);
+  
+  const openDeleteConfirmDialog = useCallback((transaction: Transaction) => {
+    setTransactionToDelete(transaction);
+  }, []);
+
+  const closeDeleteConfirmDialog = useCallback(() => {
+    setTransactionToDelete(null);
+  }, []);
+
+  const handleDeleteTransaction = async () => {
+    if (!transactionToDelete || !transactionToDelete.id) return;
+    setIsDeleting(true);
+    try {
+      await deleteDoc(doc(db, 'payments', transactionToDelete.id));
+      toast({
+        title: 'Transaction Deleted',
+        description: `Transaction "${transactionToDelete.paymentId}" has been successfully deleted.`,
+      });
+      // Optimistic update
+      setAllTransactions(prev => prev.filter(tx => tx.id !== transactionToDelete.id));
+    } catch (error) {
+      console.error("Error deleting transaction: ", error);
+      toast({
+        title: 'Deletion Failed',
+        description: (error as Error).message || 'Could not delete the transaction.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeleting(false);
+      closeDeleteConfirmDialog();
+    }
+  };
+
 
   const formatCurrency = (amount?: number, currencyCode: string = "INR") => {
     if (amount === undefined || amount === null) return 'N/A';
@@ -167,7 +229,7 @@ export default function TransactionsPage() {
         title="Transaction Log"
         description="View payment transactions from the 'payments' collection. Ordered by 'createdAt' (desc)."
         actions={
-          <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading || isInitialLoading}>
+          <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading || isInitialLoading || isDeleting}>
             <RefreshCcw className="h-4 w-4" />
             <span className="sr-only">Refresh</span>
           </Button>
@@ -200,28 +262,18 @@ export default function TransactionsPage() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <ScrollArea className="h-[60vh]"> {/* Ensure ScrollArea has a defined height */}
+          <ScrollArea className="h-[60vh]">
             {isInitialLoading && displayTransactions.length === 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Payment ID</TableHead>
-                    <TableHead>Order ID</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Method</TableHead>
-                    <TableHead>Date</TableHead>
+                    <TableHead>Payment ID</TableHead><TableHead>Order ID</TableHead><TableHead>Amount</TableHead><TableHead>Status</TableHead><TableHead>Method</TableHead><TableHead>Date</TableHead><TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {[...Array(Math.floor(PAGE_SIZE / 2))].map((_, i) => ( 
                     <TableRow key={`skeleton-${i}`}>
-                      <TableCell><Skeleton className="h-5 w-32" /></TableCell>
-                      <TableCell><Skeleton className="h-5 w-24" /></TableCell>
-                      <TableCell><Skeleton className="h-5 w-20" /></TableCell>
-                      <TableCell><Skeleton className="h-6 w-24" /></TableCell>
-                      <TableCell><Skeleton className="h-5 w-16" /></TableCell>
-                      <TableCell><Skeleton className="h-5 w-40" /></TableCell>
+                      <TableCell><Skeleton className="h-5 w-32" /></TableCell><TableCell><Skeleton className="h-5 w-24" /></TableCell><TableCell><Skeleton className="h-5 w-20" /></TableCell><TableCell><Skeleton className="h-6 w-24" /></TableCell><TableCell><Skeleton className="h-5 w-16" /></TableCell><TableCell><Skeleton className="h-5 w-40" /></TableCell><TableCell className="text-right"><Skeleton className="h-8 w-8 ml-auto" /></TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -240,13 +292,7 @@ export default function TransactionsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Payment ID</TableHead>
-                    <TableHead>Order ID</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Method</TableHead>
-                    <TableHead>Customer Email</TableHead>
-                    <TableHead>Date (Created At)</TableHead>
+                    <TableHead>Payment ID</TableHead><TableHead>Order ID</TableHead><TableHead>Amount</TableHead><TableHead>Status</TableHead><TableHead>Method</TableHead><TableHead>Customer Email</TableHead><TableHead>Date</TableHead><TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -256,7 +302,7 @@ export default function TransactionsPage() {
                       <TableCell className="font-mono text-xs">{tx.orderId}</TableCell>
                       <TableCell>{formatCurrency(tx.amount, tx.currency)}</TableCell>
                       <TableCell>
-                        <Badge variant={getStatusVariant(tx.status)} className="capitalize">
+                        <Badge variant={getStatusVariant(tx.status)} className="capitalize text-xs">
                           {tx.status || 'N/A'}
                         </Badge>
                       </TableCell>
@@ -265,9 +311,22 @@ export default function TransactionsPage() {
                       <TableCell>
                         {tx.createdAt instanceof Timestamp && isValid(tx.createdAt.toDate())
                           ? format(tx.createdAt.toDate(), 'PPp')
-                          : typeof tx.createdAt === 'string' // Fallback if somehow it's a string
+                          : typeof tx.createdAt === 'string'
                             ? tx.createdAt
                             : 'N/A'}
+                      </TableCell>
+                       <TableCell className="text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" className="h-8 w-8 p-0" disabled={isDeleting}>
+                              <span className="sr-only">Open menu</span><MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => openDetailsDialog(tx)}><Eye className="mr-2 h-4 w-4" /> View Details</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openDeleteConfirmDialog(tx)} className="text-destructive focus:text-destructive focus:bg-destructive/10" disabled={isDeleting}><Trash2 className="mr-2 h-4 w-4" /> Delete Transaction</DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -281,6 +340,25 @@ export default function TransactionsPage() {
           </ScrollArea>
         </CardContent>
       </Card>
+
+      {isDetailsDialogOpen && selectedTransactionForDetails && (
+        <TransactionDetailsDialog isOpen={isDetailsDialogOpen} onClose={closeDetailsDialog} transaction={selectedTransactionForDetails} />
+      )}
+
+      {transactionToDelete && !isDetailsDialogOpen && ( 
+        <AlertDialog open={!!transactionToDelete} onOpenChange={(open) => !open && closeDeleteConfirmDialog()}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+              <AlertDialogDescription>This action cannot be undone. This will permanently delete the transaction "{transactionToDelete.paymentId}".</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={closeDeleteConfirmDialog} disabled={isDeleting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDeleteTransaction} disabled={isDeleting} className="bg-destructive hover:bg-destructive/90">{isDeleting ? "Deleting..." : "Yes, delete transaction"}</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </>
   );
 }
