@@ -3,7 +3,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, query, orderBy, Timestamp, doc, deleteDoc, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
+import { collection, query, orderBy, Timestamp, doc, deleteDoc, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData, where, QueryConstraint } from 'firebase/firestore';
 import type { VipNumber } from '@/types';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -27,19 +27,24 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import type { ProductActiveFilters } from '@/app/admin/products/page';
 
 interface VipNumbersTabProps {
   categoryMap: Record<string, string>;
+  activeFilters: ProductActiveFilters;
 }
 
 const PAGE_SIZE = 10;
 
-export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
+export function VipNumbersTab({ categoryMap, activeFilters }: VipNumbersTabProps) {
   const [allVipNumbers, setAllVipNumbers] = useState<VipNumber[]>([]);
   const [filteredVipNumbers, setFilteredVipNumbers] = useState<VipNumber[]>([]);
+  
   const [isLoading, setIsLoading] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
+  
   const [lastVisibleDoc, setLastVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [firstVisibleDoc, setFirstVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null); // For potential future "prev page from specific point" logic
   const [hasMore, setHasMore] = useState(true);
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -52,61 +57,111 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
   const observerRef = useRef<IntersectionObserver | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   
-  const buildBaseQuery = useCallback(() => {
-    return query(collection(db, 'vipNumbers'), orderBy('createdAt', 'desc'));
-  }, []);
+  const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null, currentFilters: ProductActiveFilters) => {
+    const constraints: QueryConstraint[] = [];
 
-  const loadVipNumbers = useCallback(async (cursor: QueryDocumentSnapshot<DocumentData> | null = null, isRefresh = false) => {
-    if (isLoading && !isRefresh) return;
+    if (currentFilters.status) {
+      constraints.push(where('status', '==', currentFilters.status));
+    }
+    if (currentFilters.categorySlug) {
+      constraints.push(where('categorySlug', '==', currentFilters.categorySlug));
+    }
+    if (currentFilters.dateFrom) {
+      const fromDateStart = new Date(currentFilters.dateFrom);
+      fromDateStart.setHours(0,0,0,0);
+      constraints.push(where('createdAt', '>=', Timestamp.fromDate(fromDateStart)));
+    }
+    if (currentFilters.dateTo) {
+      const toDateEnd = new Date(currentFilters.dateTo);
+      toDateEnd.setHours(23, 59, 59, 999);
+      constraints.push(where('createdAt', '<=', Timestamp.fromDate(toDateEnd)));
+    }
+    // Price range filtering is done client-side for now
+
+    constraints.push(orderBy('createdAt', 'desc'));
+    if (cursor) {
+      constraints.push(startAfter(cursor));
+    }
+    constraints.push(limit(PAGE_SIZE));
+    
+    return query(collection(db, 'vipNumbers'), ...constraints);
+  }, []); // No dependencies, relies on passed arguments
+
+  const loadVipNumbers = useCallback(async (
+    cursor: QueryDocumentSnapshot<DocumentData> | null = null, 
+    isRefreshOrFilterChange = false,
+    currentFilters: ProductActiveFilters
+  ) => {
+    if (isLoading && !isRefreshOrFilterChange) return;
 
     setIsLoading(true);
-    if (isRefresh) {
+    if (isRefreshOrFilterChange) {
       setIsInitialLoading(true);
-      setSearchTerm(''); 
+      setSearchTerm(''); // Clear search on refresh or filter change
     }
 
     try {
-      let vipNumbersQuery = buildBaseQuery();
-      if (cursor) {
-        vipNumbersQuery = query(vipNumbersQuery, startAfter(cursor), limit(PAGE_SIZE));
-      } else {
-        vipNumbersQuery = query(vipNumbersQuery, limit(PAGE_SIZE));
+      if (isRefreshOrFilterChange) {
+        setAllVipNumbers([]);
+        setLastVisibleDoc(null);
+        setFirstVisibleDoc(null);
+        setHasMore(true); // Assume more until fetch proves otherwise
+      }
+
+      const vipNumbersQuery = buildPageQuery(cursor, currentFilters);
+      const documentSnapshots = await getDocs(vipNumbersQuery);
+      
+      let fetchedVipNumbersBatch: VipNumber[] = [];
+      documentSnapshots.docs.forEach((docSn) => {
+        fetchedVipNumbersBatch.push({ id: docSn.id, ...docSn.data() } as VipNumber);
+      });
+
+      // Client-side price filtering
+      if (typeof currentFilters.minPrice === 'number' || typeof currentFilters.maxPrice === 'number') {
+        fetchedVipNumbersBatch = fetchedVipNumbersBatch.filter(vip => {
+          const price = vip.price;
+          const meetsMin = typeof currentFilters.minPrice === 'number' ? price >= currentFilters.minPrice : true;
+          const meetsMax = typeof currentFilters.maxPrice === 'number' ? price <= currentFilters.maxPrice : true;
+          return meetsMin && meetsMax;
+        });
       }
       
-      const documentSnapshots = await getDocs(vipNumbersQuery);
-      const fetchedVipNumbers: VipNumber[] = [];
-      documentSnapshots.docs.forEach((docSn) => {
-        fetchedVipNumbers.push({ id: docSn.id, ...docSn.data() } as VipNumber);
-      });
-      
-      if (isRefresh) {
-        setAllVipNumbers(fetchedVipNumbers);
-      } else {
-        setAllVipNumbers(prevNumbers => [...prevNumbers, ...fetchedVipNumbers]);
+      if (isRefreshOrFilterChange || !cursor) { // Initial load / refresh / filter change
+        setAllVipNumbers(fetchedVipNumbersBatch);
+      } else { // Loading more
+        setAllVipNumbers(prevNumbers => [...prevNumbers, ...fetchedVipNumbersBatch]);
       }
       
       const newLastVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null;
       setLastVisibleDoc(newLastVisibleDoc);
-      setHasMore(documentSnapshots.docs.length === PAGE_SIZE);
+      
+      const newFirstVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null;
+      if (isRefreshOrFilterChange || !cursor) {
+         setFirstVisibleDoc(newFirstVisibleDoc);
+      }
+      
+      setHasMore(documentSnapshots.docs.length === PAGE_SIZE); // If less than PAGE_SIZE fetched, no more items for this query.
       
     } catch (error) {
       console.error("Error fetching VIP numbers: ", error);
       toast({
         title: 'Error Fetching VIP Numbers',
-        description: (error as Error).message || 'Could not load VIP numbers. An index on \'vipNumbers\' for \'createdAt\' (desc) might be required.',
+        description: (error as Error).message || 'Could not load VIP numbers. Check Firestore indexes for createdAt, status, categorySlug.',
         variant: 'destructive',
       });
-      setHasMore(false);
+      setHasMore(false); // Stop further loading attempts on error
     } finally {
       setIsLoading(false);
-      if (isRefresh) setIsInitialLoading(false);
+      if (isRefreshOrFilterChange) setIsInitialLoading(false);
     }
-  }, [isLoading, buildBaseQuery, toast, setIsLoading, setIsInitialLoading, setAllVipNumbers, setLastVisibleDoc, setHasMore, setSearchTerm ]);
+  }, [toast, buildPageQuery, setIsLoading, setIsInitialLoading, setAllVipNumbers, setLastVisibleDoc, setFirstVisibleDoc, setHasMore, setSearchTerm ]);
 
+  // Effect for initial load AND when activeFilters change
   useEffect(() => {
-    loadVipNumbers(null, true); // Initial fetch
-  }, [loadVipNumbers]);
+    loadVipNumbers(null, true, activeFilters); // isRefreshOrFilterChange = true
+  }, [activeFilters, loadVipNumbers]); // loadVipNumbers is memoized, this runs on activeFilters reference change
 
+  // Effect for client-side search filtering
   useEffect(() => {
     if (searchTerm === '') {
       setFilteredVipNumbers(allVipNumbers);
@@ -119,35 +174,37 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
     }
   }, [searchTerm, allVipNumbers]);
 
+  // Effect for Intersection Observer - infinite scrolling
   useEffect(() => {
-    const currentObserver = observerRef.current;
-    const currentLoadMoreRef = loadMoreRef.current;
+    const currentObserver = observerRef.current; // Capture for cleanup
 
-     if (isLoading || !hasMore) {
-      if (currentObserver && currentLoadMoreRef) currentObserver.unobserve(currentLoadMoreRef);
+    if (isLoading || !hasMore) {
+      if (currentObserver) currentObserver.disconnect();
       return;
     }
 
-    const observer = new IntersectionObserver(
+    const observerInstance = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && lastVisibleDoc) {
-          loadVipNumbers(lastVisibleDoc, false);
+        if (entries[0].isIntersecting && lastVisibleDoc) { 
+          loadVipNumbers(lastVisibleDoc, false, activeFilters); // Pass current activeFilters
         }
       },
       { threshold: 1.0 }
     );
 
+    const currentLoadMoreRef = loadMoreRef.current;
     if (currentLoadMoreRef) {
-      observer.observe(currentLoadMoreRef);
+      observerInstance.observe(currentLoadMoreRef);
     }
-    observerRef.current = observer;
+    observerRef.current = observerInstance; // Store the new observer
 
     return () => {
-      if (observer && currentLoadMoreRef) {
-        observer.unobserve(currentLoadMoreRef);
+      if (observerInstance) {
+        observerInstance.disconnect();
       }
     };
-  }, [isLoading, hasMore, lastVisibleDoc, loadVipNumbers]);
+  }, [isLoading, hasMore, lastVisibleDoc, loadVipNumbers, activeFilters]);
+
 
   const handleAddNewVipNumber = () => {
     setEditingVipNumber(null);
@@ -181,7 +238,7 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
         title: 'VIP Number Deleted',
         description: `VIP Number "${vipNumberToDelete.number}" has been successfully deleted.`,
       });
-      loadVipNumbers(null, true); // Refresh all data
+      loadVipNumbers(null, true, activeFilters); // Refresh all data with current filters
     } catch (error) {
       console.error("Error deleting VIP Number: ", error);
       toast({
@@ -196,12 +253,12 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
   };
 
   const onDialogSuccess = useCallback(() => {
-    loadVipNumbers(null, true); // Refresh all data
-  }, [loadVipNumbers]);
+    loadVipNumbers(null, true, activeFilters); // Refresh all data with current filters
+  }, [loadVipNumbers, activeFilters]);
 
   const handleRefresh = useCallback(() => {
-    loadVipNumbers(null, true);
-  }, [loadVipNumbers]);
+    loadVipNumbers(null, true, activeFilters); // Refresh all data with current filters
+  }, [loadVipNumbers, activeFilters]);
 
   const displayVipNumbers = searchTerm ? filteredVipNumbers : allVipNumbers;
 
@@ -211,7 +268,7 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <CardTitle>VIP Numbers List</CardTitle>
-            <CardDescription>Browse and manage individual VIP mobile numbers. An index on 'createdAt' (desc) might be required.</CardDescription>
+            <CardDescription>Browse and manage individual VIP mobile numbers. Filters from above apply. Check console for Firestore index errors.</CardDescription>
           </div>
           <div className="flex items-center gap-2">
             <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading || isInitialLoading}>
@@ -219,7 +276,7 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
               <span className="sr-only">Refresh</span>
             </Button>
             <Button onClick={handleAddNewVipNumber} className="bg-primary hover:bg-primary/90" disabled={isLoading || isInitialLoading}>
-              <PlusCircle className="mr-2 h-4 w-4" /> Add New VIP Number
+              <PlusCircle className="mr-2 h-4 w-4" /> Add VIP Number
             </Button>
           </div>
         </div>
@@ -227,17 +284,17 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
           <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
           <Input
             type="search"
-            placeholder="Search by number..."
+            placeholder="Search by number (on current loaded data)..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="pl-10 w-full md:w-1/2 lg:w-1/3"
-            disabled={isInitialLoading && allVipNumbers.length === 0}
+            disabled={isInitialLoading && allVipNumbers.length === 0 && !Object.values(activeFilters).some(Boolean)}
           />
         </div>
       </CardHeader>
       <CardContent className="p-0">
         <ScrollArea className="h-[60vh]"> {/* Ensure height is set for ScrollArea */}
-          {isInitialLoading && allVipNumbers.length === 0 ? (
+          {isInitialLoading ? (
             <div className="p-6 space-y-2">
               {[...Array(Math.floor(PAGE_SIZE / 2))].map((_, i) => (
                 <div key={i} className="flex items-center justify-between p-2 border rounded-md">
@@ -254,12 +311,12 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
             <div className="flex flex-col items-center justify-center text-center p-10 min-h-[300px]">
               <PackageSearch className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-xl font-semibold">
-                {searchTerm ? 'No VIP Numbers Match Your Search' : 'No VIP Numbers Found'}
+                {searchTerm || Object.values(activeFilters).some(Boolean) ? 'No VIP Numbers Match Your Search/Filters' : 'No VIP Numbers Found'}
               </h3>
               <p className="text-muted-foreground">
-                {searchTerm ? 'Try a different search term or clear search.' : 'Add your first VIP number to see it listed here.'}
+                {searchTerm || Object.values(activeFilters).some(Boolean) ? 'Try different criteria or clear search/filters.' : 'Add your first VIP number to see it listed here.'}
               </p>
-              {!searchTerm && ( 
+              {!searchTerm && !Object.values(activeFilters).some(Boolean) && ( 
                 <Button onClick={handleAddNewVipNumber} className="mt-4 bg-primary hover:bg-primary/90">
                   <PlusCircle className="mr-2 h-4 w-4" /> Add First VIP Number
                 </Button>
@@ -305,18 +362,19 @@ export function VipNumbersTab({ categoryMap }: VipNumbersTabProps) {
                     <TableCell className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
+                          <Button variant="ghost" className="h-8 w-8 p-0" disabled={isDeleting}>
                             <span className="sr-only">Open menu</span>
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleEditVipNumber(product)}>
+                          <DropdownMenuItem onClick={() => handleEditVipNumber(product)} disabled={isDeleting}>
                             <Edit className="mr-2 h-4 w-4" /> Edit
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => openDeleteConfirmDialog(product)}
                             className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                            disabled={isDeleting}
                           >
                             <Trash2 className="mr-2 h-4 w-4" /> Delete
                           </DropdownMenuItem>
