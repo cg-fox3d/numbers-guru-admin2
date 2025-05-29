@@ -9,9 +9,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { MoreHorizontal, Edit, Trash2, PackageSearch, PlusCircle, Search as SearchIcon, RefreshCcw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { MoreHorizontal, Edit, Trash2, PackageSearch, PlusCircle, Search as SearchIcon, RefreshCcw } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { NumberPackDialog } from '@/components/products/dialogs/NumberPackDialog';
@@ -34,9 +35,13 @@ interface NumberPacksTabProps {
 const PAGE_SIZE = 10;
 
 export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
-  const [numberPacksOnPage, setNumberPacksOnPage] = useState<NumberPack[]>([]); 
+  const [allNumberPacks, setAllNumberPacks] = useState<NumberPack[]>([]); 
   const [filteredNumberPacks, setFilteredNumberPacks] = useState<NumberPack[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [lastVisibleDoc, setLastVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingNumberPack, setEditingNumberPack] = useState<NumberPack | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -44,71 +49,44 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const { toast } = useToast();
 
-  const [currentPageIndex, setCurrentPageIndex] = useState(0);
-  const [pageStartCursors, setPageStartCursors] = useState<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
-  const pageStartCursorsRef = useRef(pageStartCursors);
-
-  const [lastFetchedDoc, setLastFetchedDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
-  const [hasNextPage, setHasNextPage] = useState(false);
-
-  useEffect(() => {
-    pageStartCursorsRef.current = pageStartCursors;
-  }, [pageStartCursors]);
-
-  const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null) => {
-    let q = query(collection(db, 'numberPacks'), orderBy('createdAt', 'desc'));
-    if (cursor) {
-      q = query(q, startAfter(cursor), limit(PAGE_SIZE + 1));
-    } else {
-      q = query(q, limit(PAGE_SIZE + 1));
-    }
-    return q;
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  
+  const buildBaseQuery = useCallback(() => {
+    return query(collection(db, 'numberPacks'), orderBy('createdAt', 'desc'));
   }, []);
 
-  const loadNumberPacks = useCallback(async (pageIdxToLoad: number, options: { isRefresh?: boolean } = {}) => {
-    setIsLoading(true);
-    const isActualRefresh = options.isRefresh || pageIdxToLoad === 0;
-    if (isActualRefresh) {
+  const loadNumberPacks = useCallback(async (cursor: QueryDocumentSnapshot<DocumentData> | null = null, isRefresh = false) => {
+    if (isLoading && !isRefresh) return;
+
+    if (isRefresh) {
+      setIsInitialLoading(true);
+      setAllNumberPacks([]);
+      setLastVisibleDoc(null);
+      setHasMore(true);
       setSearchTerm('');
     }
+    setIsLoading(true);
 
     try {
-      let queryCursor: QueryDocumentSnapshot<DocumentData> | null = null;
-      const currentCursors = pageStartCursorsRef.current;
-
-      if (isActualRefresh) {
-        queryCursor = null;
-         if (options.isRefresh) setPageStartCursors([null]);
-      } else if (pageIdxToLoad > 0 && pageIdxToLoad < currentCursors.length) {
-        queryCursor = currentCursors[pageIdxToLoad];
-      } else if (pageIdxToLoad > 0 && lastFetchedDoc && pageIdxToLoad === currentCursors.length) {
-        queryCursor = lastFetchedDoc; 
+      let packsQuery = buildBaseQuery();
+      if (cursor) {
+        packsQuery = query(packsQuery, startAfter(cursor), limit(PAGE_SIZE));
+      } else {
+        packsQuery = query(packsQuery, limit(PAGE_SIZE));
       }
 
-      const packsQuery = buildPageQuery(queryCursor);
       const documentSnapshots = await getDocs(packsQuery);
-
       const fetchedPacks: NumberPack[] = [];
-      documentSnapshots.docs.slice(0, PAGE_SIZE).forEach((docSn) => {
+      documentSnapshots.docs.forEach((docSn) => {
         fetchedPacks.push({ id: docSn.id, ...docSn.data() } as NumberPack);
       });
 
-      setNumberPacksOnPage(fetchedPacks);
-
-      const newLastFetchedDoc = documentSnapshots.docs.length > PAGE_SIZE
-        ? documentSnapshots.docs[PAGE_SIZE - 1]
-        : (documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length -1] : null);
-      setLastFetchedDoc(newLastFetchedDoc);
-
-      const newHasNextPage = documentSnapshots.docs.length > PAGE_SIZE;
-      setHasNextPage(newHasNextPage);
+      setAllNumberPacks(prevPacks => isRefresh ? fetchedPacks : [...prevPacks, ...fetchedPacks]);
       
-      if (isActualRefresh) {
-         const firstDocOfPage0 = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null;
-         setPageStartCursors(firstDocOfPage0 ? [null, firstDocOfPage0] : [null]);
-      } else if (pageIdxToLoad >= currentCursors.length && documentSnapshots.docs.length > 0 && queryCursor === lastFetchedDoc) {
-        setPageStartCursors(prev => [...prev, documentSnapshots.docs[0]]);
-      }
+      const newLastVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null;
+      setLastVisibleDoc(newLastVisibleDoc);
+      setHasMore(documentSnapshots.docs.length === PAGE_SIZE);
     } catch (error) {
       console.error("Error fetching number packs: ", error);
       toast({
@@ -116,39 +94,50 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
         description: (error as Error).message || 'Could not load number packs. An index on \'numberPacks\' for \'createdAt\' (desc) might be required.',
         variant: 'destructive',
       });
-      setNumberPacksOnPage([]);
-      setHasNextPage(false);
+      setHasMore(false);
     } finally {
       setIsLoading(false);
+      if (isRefresh) setIsInitialLoading(false);
     }
-  }, [
-    toast, 
-    buildPageQuery, 
-    setIsLoading, 
-    setNumberPacksOnPage, 
-    setHasNextPage, 
-    setLastFetchedDoc, 
-    setSearchTerm, 
-    setPageStartCursors
-  ]);
+  }, [isLoading, buildBaseQuery, toast]);
 
   useEffect(() => {
-    const isRefreshForEffect = currentPageIndex === 0 && pageStartCursorsRef.current.length <=1;
-    loadNumberPacks(currentPageIndex, {isRefresh: isRefreshForEffect });
-  }, [currentPageIndex, loadNumberPacks]);
+    loadNumberPacks(null, true); // Initial fetch
+  }, [loadNumberPacks]);
 
   useEffect(() => {
     if (searchTerm === '') {
-      setFilteredNumberPacks(numberPacksOnPage);
+      setFilteredNumberPacks(allNumberPacks);
     } else {
       const lowercasedFilter = searchTerm.toLowerCase();
-      const currentNumberPacks = numberPacksOnPage || [];
-      const filteredData = currentNumberPacks.filter(item =>
+      const filteredData = allNumberPacks.filter(item =>
         item.name.toLowerCase().includes(lowercasedFilter)
       );
       setFilteredNumberPacks(filteredData);
     }
-  }, [searchTerm, numberPacksOnPage]);
+  }, [searchTerm, allNumberPacks]);
+  
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !isLoading && !isInitialLoading && lastVisibleDoc) {
+          loadNumberPacks(lastVisibleDoc);
+        }
+      },
+      { threshold: 1.0 }
+    );
+
+    if (loadMoreRef.current) {
+      observer.observe(loadMoreRef.current);
+    }
+    observerRef.current = observer;
+
+    return () => {
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+      }
+    };
+  }, [hasMore, isLoading, isInitialLoading, lastVisibleDoc, loadNumberPacks]);
 
   const handleAddNewPack = () => {
     setEditingNumberPack(null);
@@ -164,9 +153,9 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
     setPackToDelete(pack);
   };
 
-  const closeDeleteConfirmDialog = () => {
+  const closeDeleteConfirmDialog = useCallback(() => {
     setPackToDelete(null);
-  };
+  }, []);
 
   const handleDeletePack = async () => {
     if (!packToDelete || !packToDelete.id) return;
@@ -177,12 +166,7 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
         title: 'Number Pack Deleted',
         description: `Pack "${packToDelete.name}" has been successfully deleted.`,
       });
-      const isLastItemOnPage = numberPacksOnPage.length === 1;
-      if (isLastItemOnPage && currentPageIndex > 0) {
-        setCurrentPageIndex(prev => prev -1); 
-      } else {
-        loadNumberPacks(currentPageIndex, { isRefresh: true });
-      }
+      loadNumberPacks(null, true); // Refresh all data
     } catch (error) {
       console.error("Error deleting number pack: ", error);
       toast({
@@ -197,8 +181,8 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
   };
 
   const onDialogSuccess = useCallback(() => {
-    loadNumberPacks(currentPageIndex, {isRefresh: true}); 
-  }, [loadNumberPacks, currentPageIndex]);
+    loadNumberPacks(null, true); // Refresh all data
+  }, [loadNumberPacks]);
 
   const handleDialogClose = useCallback(() => {
     setIsDialogOpen(false);
@@ -206,25 +190,11 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
   }, []);
   
   const handleRefresh = useCallback(() => {
-    if (currentPageIndex === 0) {
-        loadNumberPacks(0, { isRefresh: true });
-    } else {
-        setCurrentPageIndex(0); 
-    }
-  }, [loadNumberPacks, currentPageIndex]);
-
-  const handleNextPage = () => {
-    if (hasNextPage) {
-      setCurrentPageIndex(prev => prev + 1);
-    }
-  };
-
-  const handlePrevPage = () => {
-    if (currentPageIndex > 0) {
-      setCurrentPageIndex(prev => prev - 1);
-    }
-  };
+    loadNumberPacks(null, true);
+  }, [loadNumberPacks]);
   
+  const displayNumberPacks = searchTerm ? filteredNumberPacks : allNumberPacks;
+
   return (
     <Card className="shadow-lg">
       <CardHeader>
@@ -234,11 +204,11 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
             <CardDescription>Browse and manage number pack bundles. An index on 'numberPacks' for 'createdAt' (desc) might be required.</CardDescription>
           </div>
           <div className="flex items-center gap-2">
-            <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading}>
+            <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading || isInitialLoading}>
               <RefreshCcw className="h-4 w-4" />
               <span className="sr-only">Refresh</span>
             </Button>
-            <Button onClick={handleAddNewPack} className="bg-primary hover:bg-primary/90" disabled={isLoading}>
+            <Button onClick={handleAddNewPack} className="bg-primary hover:bg-primary/90" disabled={isLoading || isInitialLoading}>
                 <PlusCircle className="mr-2 h-4 w-4" /> Add New Pack
             </Button>
           </div>
@@ -247,132 +217,110 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
           <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
           <Input
             type="search"
-            placeholder="Search by pack name on current page..."
+            placeholder="Search by pack name..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="pl-10 w-full md:w-1/2 lg:w-1/3"
-            disabled={isLoading && (numberPacksOnPage || []).length === 0}
+            disabled={isInitialLoading && allNumberPacks.length === 0}
           />
         </div>
       </CardHeader>
-      <CardContent className="p-0 min-h-[300px]">
-        {isLoading ? (
-          <div className="p-6 space-y-2">
-            {[...Array(5)].map((_, i) => (
-              <div key={i} className="flex items-center justify-between p-2 border rounded-md">
-                <div className="flex-1 space-y-1">
-                  <Skeleton className="h-5 w-1/3" />
-                  <Skeleton className="h-4 w-1/4" />
+      <CardContent className="p-0">
+        <ScrollArea className="h-[60vh]"> {/* Ensure height is set for ScrollArea */}
+          {isInitialLoading ? (
+            <div className="p-6 space-y-2">
+              {[...Array(Math.floor(PAGE_SIZE / 2))].map((_, i) => (
+                <div key={i} className="flex items-center justify-between p-2 border rounded-md">
+                  <div className="flex-1 space-y-1">
+                    <Skeleton className="h-5 w-1/3" />
+                    <Skeleton className="h-4 w-1/4" />
+                  </div>
+                  <Skeleton className="h-5 w-16" />
+                  <Skeleton className="h-8 w-8 ml-4" />
                 </div>
-                <Skeleton className="h-5 w-16" />
-                <Skeleton className="h-8 w-8 ml-4" />
-              </div>
-            ))}
-          </div>
-        ) : !isLoading && (filteredNumberPacks || []).length === 0 ? (
-          <div className="flex flex-col items-center justify-center text-center p-10 min-h-[300px]">
-            <PackageSearch className="h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-xl font-semibold">
-              {searchTerm ? 'No Number Packs Match Your Search' : 
-               (numberPacksOnPage || []).length === 0 ? 'No Number Packs Found' : 'No Number Packs Match Your Search'}
-            </h3>
-            <p className="text-muted-foreground">
-              {searchTerm ? 'Try a different search term or clear search.' : 
-               (numberPacksOnPage || []).length === 0 ? 'Create your first number pack to see it listed here.' : 'Adjust your search or add more packs.'}
-            </p>
-            {!searchTerm && (numberPacksOnPage || []).length === 0 && ( 
-              <Button onClick={handleAddNewPack} className="mt-4 bg-primary hover:bg-primary/90">
-                <PlusCircle className="mr-2 h-4 w-4" /> Add First Number Pack
-              </Button>
-            )}
-          </div>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Pack Name</TableHead>
-                <TableHead>Items</TableHead>
-                <TableHead>Total Original Price (₹)</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead className="hidden lg:table-cell max-w-xs truncate">Description</TableHead>
-                <TableHead className="hidden lg:table-cell">Created At</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(filteredNumberPacks || []).map((pack) => (
-                <TableRow key={pack.id}>
-                  <TableCell className="font-medium">{pack.name}</TableCell>
-                  <TableCell>{pack.numbers?.length || 0}</TableCell>
-                  <TableCell>{(pack.totalOriginalPrice ?? 0).toLocaleString()}</TableCell>
-                  <TableCell>
-                    <Badge 
-                      variant={pack.status === 'available' ? 'default' : pack.status === 'sold' ? 'destructive' : 'secondary'}
-                      className="capitalize"
-                    >
-                      {pack.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{categoryMap[pack.categorySlug] || pack.categorySlug}</TableCell>
-                  <TableCell className="hidden lg:table-cell max-w-xs truncate">{pack.description || 'N/A'}</TableCell>
-                  <TableCell className="hidden lg:table-cell">
-                    {pack.createdAt instanceof Timestamp 
-                      ? format(pack.createdAt.toDate(), 'PPp') 
-                      : typeof pack.createdAt === 'string' 
-                        ? pack.createdAt 
-                        : 'N/A'}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" className="h-8 w-8 p-0">
-                          <span className="sr-only">Open menu</span>
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleEditPack(pack)}>
-                          <Edit className="mr-2 h-4 w-4" /> Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => openDeleteConfirmDialog(pack)} className="text-destructive focus:text-destructive focus:bg-destructive/10">
-                          <Trash2 className="mr-2 h-4 w-4" /> Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
               ))}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
-
-      {(filteredNumberPacks || []).length > 0 && !isLoading && (
-        <CardFooter className="flex items-center justify-between p-4 border-t">
-          <span className="text-sm text-muted-foreground">
-            Page {currentPageIndex + 1}
-          </span>
-          <div className="flex gap-2">
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={handlePrevPage} 
-              disabled={currentPageIndex === 0 || isLoading}
-            >
-              <ChevronLeft className="h-4 w-4 mr-1" /> Previous
-            </Button>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={handleNextPage} 
-              disabled={!hasNextPage || isLoading}
-            >
-              Next <ChevronRight className="h-4 w-4 ml-1" />
-            </Button>
+            </div>
+          ) : displayNumberPacks.length === 0 ? (
+            <div className="flex flex-col items-center justify-center text-center p-10 min-h-[300px]">
+              <PackageSearch className="h-12 w-12 text-muted-foreground mb-4" />
+              <h3 className="text-xl font-semibold">
+                {searchTerm ? 'No Number Packs Match Your Search' : 'No Number Packs Found'}
+              </h3>
+              <p className="text-muted-foreground">
+                {searchTerm ? 'Try a different search term or clear search.' : 'Create your first number pack to see it listed here.'}
+              </p>
+              {!searchTerm && ( 
+                <Button onClick={handleAddNewPack} className="mt-4 bg-primary hover:bg-primary/90">
+                  <PlusCircle className="mr-2 h-4 w-4" /> Add First Number Pack
+                </Button>
+              )}
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Pack Name</TableHead>
+                  <TableHead>Items</TableHead>
+                  <TableHead>Total Original Price (₹)</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead className="hidden lg:table-cell max-w-xs truncate">Description</TableHead>
+                  <TableHead className="hidden lg:table-cell">Created At</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {displayNumberPacks.map((pack) => (
+                  <TableRow key={pack.id}>
+                    <TableCell className="font-medium">{pack.name}</TableCell>
+                    <TableCell>{pack.numbers?.length || 0}</TableCell>
+                    <TableCell>{(pack.totalOriginalPrice ?? 0).toLocaleString()}</TableCell>
+                    <TableCell>
+                      <Badge 
+                        variant={pack.status === 'available' ? 'default' : pack.status === 'sold' ? 'destructive' : 'secondary'}
+                        className="capitalize"
+                      >
+                        {pack.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{categoryMap[pack.categorySlug] || pack.categorySlug}</TableCell>
+                    <TableCell className="hidden lg:table-cell max-w-xs truncate">{pack.description || 'N/A'}</TableCell>
+                    <TableCell className="hidden lg:table-cell">
+                      {pack.createdAt instanceof Timestamp 
+                        ? format(pack.createdAt.toDate(), 'PPp') 
+                        : typeof pack.createdAt === 'string' 
+                          ? pack.createdAt 
+                          : 'N/A'}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" className="h-8 w-8 p-0">
+                            <span className="sr-only">Open menu</span>
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleEditPack(pack)}>
+                            <Edit className="mr-2 h-4 w-4" /> Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => openDeleteConfirmDialog(pack)} className="text-destructive focus:text-destructive focus:bg-destructive/10">
+                            <Trash2 className="mr-2 h-4 w-4" /> Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+          <div ref={loadMoreRef} className="h-10 flex items-center justify-center">
+            {isLoading && !isInitialLoading && <p className="text-muted-foreground">Loading more packs...</p>}
+            {!isLoading && !hasMore && displayNumberPacks.length > 0 && <p className="text-muted-foreground">No more packs to load.</p>}
           </div>
-        </CardFooter>
-      )}
+        </ScrollArea>
+      </CardContent>
 
       {isDialogOpen && (
         <NumberPackDialog
@@ -407,3 +355,4 @@ export function NumberPacksTab({ categoryMap }: NumberPacksTabProps) {
     </Card>
   );
 }
+

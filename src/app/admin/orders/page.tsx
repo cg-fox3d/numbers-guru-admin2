@@ -33,7 +33,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 
-const PAGE_SIZE = 15; // Number of items to fetch per batch
+const PAGE_SIZE = 10;
 const ORDER_STATUSES = ["created", "paid", "pending", "processing", "shipped", "delivered", "cancelled", "failed", "refunded", "confirmed"];
 
 interface ActiveFilters {
@@ -71,7 +71,7 @@ export default function OrdersPage() {
   const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>({});
 
-  const buildBaseQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null, currentFilters: ActiveFilters) => {
+  const buildBaseQuery = useCallback((currentFilters: ActiveFilters) => {
     const constraints: QueryConstraint[] = [];
 
     if (currentFilters.status) {
@@ -87,16 +87,10 @@ export default function OrdersPage() {
     }
     
     constraints.push(orderBy('orderDate', 'desc'));
-
-    if (cursor) {
-      constraints.push(startAfter(cursor));
-    }
-    constraints.push(limit(PAGE_SIZE));
-
     return query(collection(db, 'orders'), ...constraints);
   }, []);
 
-  const fetchOrders = useCallback(async (cursor: QueryDocumentSnapshot<DocumentData> | null, isRefreshOrFilterChange = false) => {
+  const fetchOrders = useCallback(async (cursor: QueryDocumentSnapshot<DocumentData> | null = null, isRefreshOrFilterChange = false) => {
     if (isLoading && !isRefreshOrFilterChange) return; 
     
     if (isRefreshOrFilterChange) {
@@ -104,11 +98,18 @@ export default function OrdersPage() {
       setAllOrders([]); 
       setLastVisibleDoc(null);
       setHasMore(true);
+      // setSearchTerm(''); // Keep search term on filter change unless explicit refresh
     }
     setIsLoading(true);
 
     try {
-      const ordersQuery = buildBaseQuery(cursor, activeFilters);
+      let ordersQuery = buildBaseQuery(activeFilters);
+      if(cursor) {
+        ordersQuery = query(ordersQuery, startAfter(cursor), limit(PAGE_SIZE));
+      } else {
+        ordersQuery = query(ordersQuery, limit(PAGE_SIZE));
+      }
+      
       const documentSnapshots = await getDocs(ordersQuery);
       
       let fetchedOrders: AdminOrder[] = [];
@@ -116,6 +117,7 @@ export default function OrdersPage() {
         fetchedOrders.push({ id: docSn.id, ...docSn.data() } as AdminOrder);
       });
 
+      // Client-side filtering for amount
       if (typeof activeFilters.minAmount === 'number' || typeof activeFilters.maxAmount === 'number') {
         fetchedOrders = fetchedOrders.filter(order => {
           const amount = order.amount;
@@ -141,15 +143,14 @@ export default function OrdersPage() {
       setHasMore(false);
     } finally {
       setIsLoading(false);
-      setIsInitialLoading(false);
+      if (isRefreshOrFilterChange) setIsInitialLoading(false);
     }
-  }, [toast, buildBaseQuery, activeFilters, isLoading]); // isLoading added to deps to prevent multiple calls if one is already in progress
+  }, [isLoading, buildBaseQuery, activeFilters, toast]);
 
 
   useEffect(() => {
-    // Fetch on initial mount and when activeFilters change
     fetchOrders(null, true); 
-  }, [activeFilters, fetchOrders]); // fetchOrders is memoized
+  }, [activeFilters, fetchOrders]);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -188,8 +189,8 @@ export default function OrdersPage() {
   }, [searchTerm, allOrders]);
 
   const handleRefresh = useCallback(() => {
-    setSearchTerm('');
-    // activeFilters remain the same, just re-fetch page 1 with current filters
+    setSearchTerm(''); 
+    // activeFilters remain, fetchOrders with isRefreshOrFilterChange=true will reset list
     fetchOrders(null, true); 
   }, [fetchOrders, setSearchTerm]);
 
@@ -283,7 +284,7 @@ export default function OrdersPage() {
     const maxAmountNum = parseFloat(filterMaxAmount);
     if (!isNaN(maxAmountNum)) newActiveFilters.maxAmount = maxAmountNum;
 
-    setActiveFilters(newActiveFilters); 
+    setActiveFilters(newActiveFilters); // This will trigger the useEffect for fetchOrders
     setIsFilterPopoverOpen(false);
   };
 
@@ -293,7 +294,7 @@ export default function OrdersPage() {
     setFilterStatus('');
     setFilterMinAmount('');
     setFilterMaxAmount('');
-    setActiveFilters({}); 
+    setActiveFilters({}); // This will trigger the useEffect for fetchOrders
     setIsFilterPopoverOpen(false);
   };
 
@@ -424,7 +425,7 @@ export default function OrdersPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {[...Array(Math.floor(PAGE_SIZE / 2))].map((_, i) => ( // Show fewer skeletons initially
+                  {[...Array(Math.floor(PAGE_SIZE / 2))].map((_, i) => ( 
                     <TableRow key={`skeleton-${i}`}>
                       <TableCell><Skeleton className="h-5 w-24" /></TableCell><TableCell><Skeleton className="h-5 w-32" /></TableCell><TableCell><Skeleton className="h-5 w-40" /></TableCell><TableCell><Skeleton className="h-5 w-20" /></TableCell><TableCell><Skeleton className="h-6 w-24" /></TableCell><TableCell className="text-right"><Skeleton className="h-8 w-8 ml-auto" /></TableCell>
                     </TableRow>
@@ -521,3 +522,4 @@ export default function OrdersPage() {
     </>
   );
 }
+
