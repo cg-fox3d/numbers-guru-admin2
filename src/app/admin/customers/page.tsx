@@ -10,7 +10,7 @@ import { Users, MoreHorizontal, Search as SearchIcon, PackageSearch, RefreshCcw 
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
-import { collection, query, orderBy, Timestamp, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
+import { collection, query, orderBy, Timestamp, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData, QueryConstraint } from 'firebase/firestore';
 import type { AdminDisplayCustomer } from '@/types';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
@@ -32,6 +32,7 @@ export default function CustomersPage() {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   
   const [lastVisibleDoc, setLastVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [firstVisibleDoc, setFirstVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasMore, setHasMore] = useState(true);
   
   const [searchTerm, setSearchTerm] = useState('');
@@ -40,29 +41,37 @@ export default function CustomersPage() {
   const observerRef = useRef<IntersectionObserver | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
-  const buildBaseQuery = useCallback(() => {
-    return query(collection(db, 'users'), orderBy('createdAt', 'desc'));
+  const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null): QueryConstraint[] => {
+    const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')];
+    if (cursor) {
+      constraints.push(startAfter(cursor));
+    }
+    constraints.push(limit(PAGE_SIZE));
+    return constraints;
   }, []);
 
   const loadCustomers = useCallback(async (
     cursor: QueryDocumentSnapshot<DocumentData> | null = null,
     isRefresh = false
   ) => {
-    if (isLoading && !isRefresh) return;
+    if (isLoading) return;
 
     setIsLoading(true);
     if (isRefresh) {
       setIsInitialLoading(true);
-      setSearchTerm(''); // Clear search on refresh
+      setSearchTerm(''); 
     }
 
     try {
-      let customersQuery = buildBaseQuery();
-      if (cursor) {
-        customersQuery = query(customersQuery, startAfter(cursor), limit(PAGE_SIZE));
-      } else {
-        customersQuery = query(customersQuery, limit(PAGE_SIZE));
+      if (isRefresh) {
+        setAllCustomers([]);
+        setLastVisibleDoc(null);
+        setFirstVisibleDoc(null);
+        setHasMore(true); 
       }
+
+      const queryConstraints = buildPageQuery(cursor);
+      const customersQuery = query(collection(db, 'users'), ...queryConstraints);
       
       const documentSnapshots = await getDocs(customersQuery);
       const fetchedCustomersBatch: AdminDisplayCustomer[] = [];
@@ -70,9 +79,10 @@ export default function CustomersPage() {
         fetchedCustomersBatch.push({ id: docSn.id, ...docSn.data() } as AdminDisplayCustomer);
       });
 
-      if (isRefresh || !cursor) {
+      if (isRefresh || !cursor) { // Initial load or refresh
         setAllCustomers(fetchedCustomersBatch);
-      } else {
+        setFirstVisibleDoc(documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null);
+      } else { // Loading more
         setAllCustomers(prevCustomers => [...prevCustomers, ...fetchedCustomersBatch]);
       }
       
@@ -87,20 +97,20 @@ export default function CustomersPage() {
         description: (error as Error).message || 'Could not load customer data. An index on \'users\' for \'createdAt\' (desc) might be required.',
         variant: 'destructive',
       });
-      setHasMore(false); // Stop trying to load more if an error occurs
+      setHasMore(false); 
     } finally {
       setIsLoading(false);
       if (isRefresh) {
         setIsInitialLoading(false);
       }
     }
-  }, [toast, buildBaseQuery, isLoading]); // Dependencies for loadCustomers
+  }, [toast, buildPageQuery, isLoading, setIsLoading, setIsInitialLoading, setAllCustomers, setLastVisibleDoc, setFirstVisibleDoc, setHasMore, setSearchTerm]);
 
 
   // Effect for initial load
   useEffect(() => {
     loadCustomers(null, true);
-  }, [loadCustomers]); // loadCustomers is memoized
+  }, [loadCustomers]);
 
 
   // Effect for client-side search filtering
@@ -130,7 +140,7 @@ export default function CustomersPage() {
 
     const observerInstance = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && lastVisibleDoc) { 
+        if (entries[0].isIntersecting && lastVisibleDoc && !isLoading) { 
           loadCustomers(lastVisibleDoc, false);
         }
       },
@@ -179,7 +189,7 @@ export default function CustomersPage() {
               </CardTitle>
               <CardDescription>
                 Displaying users from the Firestore 'users' collection. Scroll to load more.
-                An index on 'users' for 'createdAt' (descending) may be required by Firestore.
+                An index on 'users' for 'createdAt' (descending) may be required by Firestore. Check console.
               </CardDescription>
             </div>
           </div>
@@ -196,8 +206,8 @@ export default function CustomersPage() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-            <ScrollArea className="h-[60vh]"> {/* Ensure height is set for ScrollArea */}
-              {isInitialLoading ? (
+            <ScrollArea className="h-[60vh]"> {/* Ensure height is set */}
+              {isInitialLoading && allCustomers.length === 0 ? (
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -227,7 +237,7 @@ export default function CustomersPage() {
                     {searchTerm ? 'No Customers Match Your Search' : 'No Customers Found'}
                   </h3>
                   <p className="text-muted-foreground">
-                    {searchTerm ? 'Try a different search term or clear search.' : "The 'users' collection might be empty or there was an issue fetching data."}
+                    {searchTerm ? 'Try a different search term or clear search.' : "The 'users' collection might be empty or there was an issue fetching data (check console for index errors)."}
                   </p>
                    {searchTerm && (
                     <Button onClick={() => setSearchTerm('')} variant="outline" className="mt-4">Clear Search</Button>
@@ -281,7 +291,7 @@ export default function CustomersPage() {
               )}
               <div ref={loadMoreRef} className="h-10 flex items-center justify-center">
                 {isLoading && !isInitialLoading && <p className="text-muted-foreground">Loading more customers...</p>}
-                {!isLoading && !hasMore && displayCustomers.length > 0 && <p className="text-muted-foreground">No more customers to load.</p>}
+                {!isLoading && !isInitialLoading && !hasMore && displayCustomers.length > 0 && <p className="text-muted-foreground">No more customers to load.</p>}
               </div>
             </ScrollArea>
         </CardContent>
