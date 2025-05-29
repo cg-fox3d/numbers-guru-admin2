@@ -37,9 +37,9 @@ const ORDER_STATUSES = ["created", "paid", "pending", "processing", "shipped", "
 
 
 export default function OrdersPage() {
-  const [allOrders, setAllOrders] = useState<AdminOrder[]>([]); // Holds data for the current page, before client-side filtering
-  const [ordersOnPage, setOrdersOnPage] = useState<AdminOrder[]>([]); // Holds data after Firestore fetch, before client-side price filter
-  const [filteredOrders, setFilteredOrders] = useState<AdminOrder[]>([]); // Final list for display after all filters
+  const [ordersOnPage, setOrdersOnPage] = useState<AdminOrder[]>([]); 
+  const [allOrdersForClientFilter, setAllOrdersForClientFilter] = useState<AdminOrder[]>([]);
+  const [filteredOrders, setFilteredOrders] = useState<AdminOrder[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const { toast } = useToast();
@@ -49,7 +49,9 @@ export default function OrdersPage() {
   const pageStartCursorsRef = useRef(pageStartCursors);
 
   const [lastVisibleDoc, setLastVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const lastVisibleDocRef = useRef(lastVisibleDoc);
   const [firstVisibleDoc, setFirstVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const firstVisibleDocRef = useRef(firstVisibleDoc);
   const [hasNextPage, setHasNextPage] = useState(false);
 
   const [selectedOrderForDetails, setSelectedOrderForDetails] = useState<AdminOrder | null>(null);
@@ -57,7 +59,6 @@ export default function OrdersPage() {
   const [orderToModify, setOrderToModify] = useState<AdminOrder | null>(null);
   const [isModifyLoading, setIsModifyLoading] = useState(false);
 
-  // Filter states
   const [filterDateFrom, setFilterDateFrom] = useState<Date | undefined>(undefined);
   const [filterDateTo, setFilterDateTo] = useState<Date | undefined>(undefined);
   const [filterStatus, setFilterStatus] = useState<string>('');
@@ -72,14 +73,26 @@ export default function OrdersPage() {
     minAmount?: number;
     maxAmount?: number;
   }>({});
+  const previousActiveFiltersRef = useRef(activeFilters);
+
 
   useEffect(() => {
     pageStartCursorsRef.current = pageStartCursors;
   }, [pageStartCursors]);
 
+  useEffect(() => {
+    lastVisibleDocRef.current = lastVisibleDoc;
+  }, [lastVisibleDoc]);
+
+  useEffect(() => {
+    firstVisibleDocRef.current = firstVisibleDoc;
+  }, [firstVisibleDoc]);
+
   const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null) => {
     const constraints: QueryConstraint[] = [];
 
+    // IMPORTANT: Check browser console for Firestore index errors if queries fail or are slow.
+    // Firestore may require specific composite indexes for queries involving multiple 'where' filters and 'orderBy'.
     if (activeFilters.status) {
       constraints.push(where('orderStatus', '==', activeFilters.status));
     }
@@ -87,13 +100,11 @@ export default function OrdersPage() {
       constraints.push(where('orderDate', '>=', Timestamp.fromDate(activeFilters.dateFrom)));
     }
     if (activeFilters.dateTo) {
-      // To include the whole 'to' day, set time to end of day
       const toDateEnd = new Date(activeFilters.dateTo);
       toDateEnd.setHours(23, 59, 59, 999);
       constraints.push(where('orderDate', '<=', Timestamp.fromDate(toDateEnd)));
     }
 
-    // Main ordering
     constraints.push(orderBy('orderDate', 'desc'));
     
     if (cursor) {
@@ -106,23 +117,27 @@ export default function OrdersPage() {
 
   const loadOrders = useCallback(async (pageIdxToLoad: number, options: { isRefresh?: boolean } = {}) => {
     setIsLoading(true);
-    const isActualRefresh = options.isRefresh || pageIdxToLoad === 0;
-    if (isActualRefresh) {
-      setSearchTerm('');
-    }
+    const isFullRefresh = options.isRefresh || pageIdxToLoad === 0 && (pageStartCursorsRef.current.length <= 1 || JSON.stringify(activeFilters) !== JSON.stringify(previousActiveFiltersRef.current));
 
+    if (isFullRefresh) {
+      setSearchTerm(''); // Reset search on full refresh
+      previousActiveFiltersRef.current = activeFilters;
+    }
+    
     try {
       let queryCursor: QueryDocumentSnapshot<DocumentData> | null = null;
-      const currentCursors = pageStartCursorsRef.current;
 
-      if (isActualRefresh) {
+      if (isFullRefresh) {
         queryCursor = null;
-        if (options.isRefresh) setPageStartCursors([null]);
-      } else if (pageIdxToLoad > 0 && pageIdxToLoad < currentCursors.length) {
-        queryCursor = currentCursors[pageIdxToLoad];
-      } else if (pageIdxToLoad > 0 && lastVisibleDoc && pageIdxToLoad === currentCursors.length) {
-        queryCursor = lastVisibleDoc;
+        setPageStartCursors([null]); 
+      } else if (pageIdxToLoad > currentPageIndex && lastVisibleDocRef.current) { // Going Next
+        queryCursor = lastVisibleDocRef.current;
+      } else if (pageIdxToLoad < currentPageIndex && pageStartCursorsRef.current[pageIdxToLoad]) { // Going Previous
+        queryCursor = pageStartCursorsRef.current[pageIdxToLoad];
+      } else if (pageStartCursorsRef.current[pageIdxToLoad]) { // Navigating to an already known page start
+         queryCursor = pageStartCursorsRef.current[pageIdxToLoad];
       }
+
 
       const ordersQuery = buildPageQuery(queryCursor);
       const documentSnapshots = await getDocs(ordersQuery);
@@ -132,23 +147,23 @@ export default function OrdersPage() {
         fetchedOrders.push({ id: docSn.id, ...docSn.data() } as AdminOrder);
       });
       
-      setOrdersOnPage(fetchedOrders); // Set data before client-side price filtering
-      // setAllOrders is for search, setOrdersOnPage is for price filter + display
+      setOrdersOnPage(fetchedOrders);
+      setAllOrdersForClientFilter(fetchedOrders); // For client-side price filtering
       
       const newFirstVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null;
       setFirstVisibleDoc(newFirstVisibleDoc);
       
       const newLastFetchedDoc = documentSnapshots.docs.length > PAGE_SIZE
-        ? documentSnapshots.docs[PAGE_SIZE - 1]
+        ? documentSnapshots.docs[PAGE_SIZE -1] // The actual last doc of the current page
         : (documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null);
       setLastVisibleDoc(newLastFetchedDoc);
 
       const newHasNextPage = documentSnapshots.docs.length > PAGE_SIZE;
       setHasNextPage(newHasNextPage);
 
-      if (isActualRefresh) {
+      if (isFullRefresh) {
          setPageStartCursors(newFirstVisibleDoc ? [null, newFirstVisibleDoc] : [null]);
-      } else if (pageIdxToLoad >= currentCursors.length && newFirstVisibleDoc && queryCursor === lastVisibleDoc) {
+      } else if (pageIdxToLoad >= pageStartCursorsRef.current.length && newFirstVisibleDoc && queryCursor === lastVisibleDocRef.current) { // Successfully moved to a new next page
         setPageStartCursors(prev => [...prev, newFirstVisibleDoc]);
       }
 
@@ -156,25 +171,36 @@ export default function OrdersPage() {
       console.error("Error fetching orders: ", error);
       toast({
         title: 'Error Fetching Orders',
-        description: (error as Error).message || 'Could not load orders. Ensure Firestore indexes are set up for status/date filters.',
+        description: (error as Error).message || 'Could not load orders. Check console for details & ensure Firestore indexes are set up for current filters.',
         variant: 'destructive',
       });
       setOrdersOnPage([]);
+      setAllOrdersForClientFilter([]);
       setHasNextPage(false);
     } finally {
       setIsLoading(false);
     }
-  }, [toast, buildPageQuery, lastVisibleDoc, setPageStartCursors, setIsLoading, setOrdersOnPage, setHasNextPage, setLastVisibleDoc, setSearchTerm, setFirstVisibleDoc]);
+  }, [
+    toast, 
+    buildPageQuery, 
+    activeFilters, // Added activeFilters to ensure loadOrders rebuilds if filters change
+    currentPageIndex, // Added for context in next/prev logic
+    // Not including lastVisibleDocRef.current, pageStartCursorsRef.current directly
+    // State setters are stable
+    setIsLoading, setOrdersOnPage, setAllOrdersForClientFilter, setHasNextPage, setLastVisibleDoc, 
+    setFirstVisibleDoc, setPageStartCursors, setSearchTerm
+  ]);
 
   useEffect(() => {
-    loadOrders(currentPageIndex, {isRefresh: currentPageIndex === 0 && pageStartCursorsRef.current.length <=1 });
-  }, [currentPageIndex, loadOrders, activeFilters]); // Re-fetch if activeFilters change
+    // This effect triggers when currentPageIndex changes, or when loadOrders itself changes
+    // (which happens if activeFilters change, because buildPageQuery is a dep of loadOrders).
+    const isInitialOrFilterDrivenLoad = currentPageIndex === 0;
+    loadOrders(currentPageIndex, { isRefresh: isInitialOrFilterDrivenLoad });
+  }, [currentPageIndex, loadOrders]); // `loadOrders` will change if `activeFilters` (via `buildPageQuery`) changes.
 
-  // Client-side filtering (search and price range)
   useEffect(() => {
-    let tempOrders = ordersOnPage || [];
+    let tempOrders = allOrdersForClientFilter || [];
 
-    // Price Range Filter (Client-side)
     const min = activeFilters.minAmount;
     const max = activeFilters.maxAmount;
     if (typeof min === 'number' || typeof max === 'number') {
@@ -185,28 +211,26 @@ export default function OrdersPage() {
         return meetsMin && meetsMax;
       });
     }
-    setAllOrders(tempOrders); // Set for search filtering
 
-    // Search Filter
-    const lowercasedFilter = searchTerm.toLowerCase();
+    const lowercasedSearch = searchTerm.toLowerCase();
     if (searchTerm === '') {
       setFilteredOrders(tempOrders);
     } else {
-      const filteredData = tempOrders.filter(order =>
-        order.orderId.toLowerCase().includes(lowercasedFilter) ||
-        order.customerName.toLowerCase().includes(lowercasedFilter) ||
-        order.customerEmail.toLowerCase().includes(lowercasedFilter)
+      const searchedData = tempOrders.filter(order =>
+        order.orderId.toLowerCase().includes(lowercasedSearch) ||
+        order.customerName.toLowerCase().includes(lowercasedSearch) ||
+        order.customerEmail.toLowerCase().includes(lowercasedSearch)
       );
-      setFilteredOrders(filteredData);
+      setFilteredOrders(searchedData);
     }
-  }, [searchTerm, ordersOnPage, activeFilters]);
+  }, [searchTerm, allOrdersForClientFilter, activeFilters.minAmount, activeFilters.maxAmount]);
 
 
   const handleRefresh = useCallback(() => {
     if (currentPageIndex === 0) {
         loadOrders(0, { isRefresh: true });
     } else {
-        setCurrentPageIndex(0); // This will trigger useEffect due to currentPageIndex change
+        setCurrentPageIndex(0); // This will trigger useEffect due to currentPageIndex change, which calls loadOrders
     }
   }, [loadOrders, currentPageIndex]);
 
@@ -244,7 +268,7 @@ export default function OrdersPage() {
         title: 'Status Updated',
         description: `Order ${orderId} marked as delivered.`,
       });
-      loadOrders(currentPageIndex, { isRefresh: true });
+      loadOrders(currentPageIndex, { isRefresh: true }); // Refresh current page
     } catch (error) {
       console.error("Error updating order status: ", error);
       toast({
@@ -278,7 +302,7 @@ export default function OrdersPage() {
       if (isLastItemOnPage && currentPageIndex > 0) {
         setCurrentPageIndex(prev => prev -1); 
       } else {
-        loadOrders(currentPageIndex, { isRefresh: true });
+        loadOrders(currentPageIndex, { isRefresh: true }); // Refresh current page
       }
     } catch (error) {
       console.error("Error deleting order: ", error);
@@ -292,7 +316,6 @@ export default function OrdersPage() {
       closeDeleteConfirmDialog();
     }
   };
-
 
   const formatCurrency = (amount: number, currencyCode: string = "INR") => {
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: currencyCode }).format(amount);
@@ -325,9 +348,8 @@ export default function OrdersPage() {
     if (!isNaN(maxAmountNum)) newActiveFilters.maxAmount = maxAmountNum;
 
     setActiveFilters(newActiveFilters);
-    setCurrentPageIndex(0); // Reset to first page when filters change
+    setCurrentPageIndex(0); 
     setIsFilterPopoverOpen(false);
-    // loadOrders will be called by useEffect due to activeFilters or currentPageIndex change
   };
 
   const handleClearFilters = () => {
@@ -339,21 +361,21 @@ export default function OrdersPage() {
     setActiveFilters({});
     setCurrentPageIndex(0);
     setIsFilterPopoverOpen(false);
-    // loadOrders will be called by useEffect
   };
 
   return (
     <>
       <PageHeader
         title="Orders Management"
-        description="View and manage customer orders."
+        description="View and manage customer orders. PLEASE CHECK BROWSER CONSOLE FOR FIRESTORE INDEX ERRORS."
         actions={
           <div className="flex items-center gap-2">
             <Popover open={isFilterPopoverOpen} onOpenChange={setIsFilterPopoverOpen}>
               <PopoverTrigger asChild>
                 <Button variant="outline" disabled={isLoading || isModifyLoading}>
                   <FilterIcon className="mr-2 h-4 w-4" />
-                  Filters {Object.keys(activeFilters).length > 0 && `(${Object.keys(activeFilters).length})`}
+                  Filters {Object.values(activeFilters).filter(v => v !== undefined && v !== '' && (Array.isArray(v) ? v.length > 0 : true)).length > 0 && `(${Object.values(activeFilters).filter(v => v !== undefined && v !== '' && (Array.isArray(v) ? v.length > 0 : true) ).length})`}
+
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-80" align="end">
@@ -465,6 +487,7 @@ export default function OrdersPage() {
               </CardTitle>
               <CardDescription>
                 Browse customer orders. Indexes on 'orderDate' (desc), 'orderStatus', and 'amount' might be required.
+                PLEASE CHECK BROWSER CONSOLE FOR FIRESTORE INDEX ERRORS.
               </CardDescription>
             </div>
           </div>
@@ -494,7 +517,7 @@ export default function OrdersPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {[...Array(5)].map((_, i) => (
+                {[...Array(PAGE_SIZE)].map((_, i) => (
                   <TableRow key={`skeleton-${i}`}>
                     <TableCell><Skeleton className="h-5 w-24" /></TableCell>
                     <TableCell><Skeleton className="h-5 w-32" /></TableCell>
@@ -510,14 +533,14 @@ export default function OrdersPage() {
             <div className="flex flex-col items-center justify-center text-center p-10 min-h-[300px]">
               <PackageSearch className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-xl font-semibold">
-                {searchTerm || Object.keys(activeFilters).length > 0 ? 'No Orders Match Your Search/Filters' : 
-                 (ordersOnPage || []).length === 0 ? 'No Orders Found' : 'No Orders Match Your Search'}
+                {searchTerm || Object.values(activeFilters).some(v => v !== undefined && v !== '' && (Array.isArray(v) ? v.length > 0 : true)) ? 'No Orders Match Your Search/Filters' : 
+                 (ordersOnPage || []).length === 0 ? 'No Orders Found' : 'No Orders Match Your Search/Filters'}
               </h3>
               <p className="text-muted-foreground">
-                {searchTerm || Object.keys(activeFilters).length > 0 ? 'Try different criteria or clear search/filters.' : 
-                 (ordersOnPage || []).length === 0 ? "The 'orders' collection might be empty or there was an issue fetching data." : 'Adjust your search.'}
+                {searchTerm || Object.values(activeFilters).some(v => v !== undefined && v !== '' && (Array.isArray(v) ? v.length > 0 : true)) ? 'Try different criteria or clear search/filters.' : 
+                 (ordersOnPage || []).length === 0 ? "The 'orders' collection might be empty or there was an issue fetching data (check console for index errors)." : 'Adjust your search.'}
               </p>
-              {(searchTerm || Object.keys(activeFilters).length > 0) && (
+              {(searchTerm || Object.values(activeFilters).some(v => v !== undefined && v !== '' && (Array.isArray(v) ? v.length > 0 : true))) && (
                   <Button onClick={() => { setSearchTerm(''); handleClearFilters(); }} variant="outline" className="mt-4">Clear Search & Filters</Button>
               )}
             </div>
@@ -568,7 +591,7 @@ export default function OrdersPage() {
                           </DropdownMenuItem>
                           <DropdownMenuItem 
                             onClick={() => handleUpdateStatus(order.id)}
-                            disabled={order.orderStatus.toLowerCase() === 'delivered'}
+                            disabled={order.orderStatus.toLowerCase() === 'delivered' || isModifyLoading}
                           >
                             <CheckCircle className="mr-2 h-4 w-4" /> Mark as Delivered
                           </DropdownMenuItem>
@@ -576,6 +599,7 @@ export default function OrdersPage() {
                           <DropdownMenuItem 
                             onClick={() => openDeleteConfirmDialog(order)} 
                             className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                            disabled={isModifyLoading}
                           >
                             <Trash2 className="mr-2 h-4 w-4" /> Delete Order
                           </DropdownMenuItem>
