@@ -1,3 +1,4 @@
+
 'use client';
 
 import Link from 'next/link';
@@ -16,6 +17,8 @@ import {
   Users,
   ExternalLink,
   Sigma,
+  ListChecks,
+  Undo2,
 } from 'lucide-react';
 
 const navItems = [
@@ -23,6 +26,8 @@ const navItems = [
   { href: '/admin/products', label: 'Products', icon: Package },
   { href: '/admin/categories', label: 'Categories', icon: FolderKanban },
   { href: '/admin/orders', label: 'Orders', icon: ShoppingCart },
+  { href: '/admin/transactions', label: 'Transactions', icon: ListChecks },
+  { href: '/admin/refunds', label: 'Refunds', icon: Undo2 },
   { href: '/admin/customers', label: 'Customers', icon: Users },
 ];
 

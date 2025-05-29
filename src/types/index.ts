@@ -103,9 +103,37 @@ export interface AdminOrder {
   receipt?: string;
 }
 
+export interface Transaction {
+  id: string; // Firestore document ID
+  paymentId: string;
+  orderId: string;
+  amount: number;
+  currency: string;
+  status: string;
+  method?: string;
+  transactionDate: Timestamp;
+  customerEmail?: string;
+  createdAt?: Timestamp;
+}
+
+export interface Refund {
+  id: string; // Firestore document ID
+  refundId: string;
+  paymentId: string;
+  orderId: string;
+  amount: number;
+  currency: string;
+  status: string;
+  reason?: string;
+  refundDate: Timestamp;
+  customerEmail?: string;
+  createdAt?: Timestamp;
+}
+
 export interface DashboardStats {
   totalRevenue: number;
   newCustomers: number; 
   ordersThisMonth: number;
   productsInStock: number;
 }
+
