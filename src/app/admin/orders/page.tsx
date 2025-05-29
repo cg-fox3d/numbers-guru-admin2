@@ -117,10 +117,10 @@ export default function OrdersPage() {
 
   const loadOrders = useCallback(async (pageIdxToLoad: number, options: { isRefresh?: boolean } = {}) => {
     setIsLoading(true);
-    const isFullRefresh = options.isRefresh || pageIdxToLoad === 0 && (pageStartCursorsRef.current.length <= 1 || JSON.stringify(activeFilters) !== JSON.stringify(previousActiveFiltersRef.current));
+    const isFullRefresh = options.isRefresh || (pageIdxToLoad === 0 && (pageStartCursorsRef.current.length <= 1 || JSON.stringify(activeFilters) !== JSON.stringify(previousActiveFiltersRef.current)));
 
     if (isFullRefresh) {
-      setSearchTerm(''); // Reset search on full refresh
+      setSearchTerm(''); 
       previousActiveFiltersRef.current = activeFilters;
     }
     
@@ -129,12 +129,14 @@ export default function OrdersPage() {
 
       if (isFullRefresh) {
         queryCursor = null;
-        setPageStartCursors([null]); 
-      } else if (pageIdxToLoad > currentPageIndex && lastVisibleDocRef.current) { // Going Next
+        if (options.isRefresh || JSON.stringify(activeFilters) !== JSON.stringify(previousActiveFiltersRef.current)) {
+            setPageStartCursors([null]); 
+        }
+      } else if (pageIdxToLoad > currentPageIndex && lastVisibleDocRef.current) { 
         queryCursor = lastVisibleDocRef.current;
-      } else if (pageIdxToLoad < currentPageIndex && pageStartCursorsRef.current[pageIdxToLoad]) { // Going Previous
+      } else if (pageIdxToLoad < currentPageIndex && pageStartCursorsRef.current[pageIdxToLoad]) { 
         queryCursor = pageStartCursorsRef.current[pageIdxToLoad];
-      } else if (pageStartCursorsRef.current[pageIdxToLoad]) { // Navigating to an already known page start
+      } else if (pageStartCursorsRef.current[pageIdxToLoad]) { 
          queryCursor = pageStartCursorsRef.current[pageIdxToLoad];
       }
 
@@ -148,13 +150,13 @@ export default function OrdersPage() {
       });
       
       setOrdersOnPage(fetchedOrders);
-      setAllOrdersForClientFilter(fetchedOrders); // For client-side price filtering
+      setAllOrdersForClientFilter(fetchedOrders); 
       
       const newFirstVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null;
       setFirstVisibleDoc(newFirstVisibleDoc);
       
       const newLastFetchedDoc = documentSnapshots.docs.length > PAGE_SIZE
-        ? documentSnapshots.docs[PAGE_SIZE -1] // The actual last doc of the current page
+        ? documentSnapshots.docs[PAGE_SIZE -1] 
         : (documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null);
       setLastVisibleDoc(newLastFetchedDoc);
 
@@ -163,7 +165,7 @@ export default function OrdersPage() {
 
       if (isFullRefresh) {
          setPageStartCursors(newFirstVisibleDoc ? [null, newFirstVisibleDoc] : [null]);
-      } else if (pageIdxToLoad >= pageStartCursorsRef.current.length && newFirstVisibleDoc && queryCursor === lastVisibleDocRef.current) { // Successfully moved to a new next page
+      } else if (pageIdxToLoad >= pageStartCursorsRef.current.length && newFirstVisibleDoc && queryCursor === lastVisibleDocRef.current) { 
         setPageStartCursors(prev => [...prev, newFirstVisibleDoc]);
       }
 
@@ -183,20 +185,16 @@ export default function OrdersPage() {
   }, [
     toast, 
     buildPageQuery, 
-    activeFilters, // Added activeFilters to ensure loadOrders rebuilds if filters change
-    currentPageIndex, // Added for context in next/prev logic
-    // Not including lastVisibleDocRef.current, pageStartCursorsRef.current directly
-    // State setters are stable
+    activeFilters, 
+    currentPageIndex, 
     setIsLoading, setOrdersOnPage, setAllOrdersForClientFilter, setHasNextPage, setLastVisibleDoc, 
     setFirstVisibleDoc, setPageStartCursors, setSearchTerm
   ]);
 
   useEffect(() => {
-    // This effect triggers when currentPageIndex changes, or when loadOrders itself changes
-    // (which happens if activeFilters change, because buildPageQuery is a dep of loadOrders).
     const isInitialOrFilterDrivenLoad = currentPageIndex === 0;
     loadOrders(currentPageIndex, { isRefresh: isInitialOrFilterDrivenLoad });
-  }, [currentPageIndex, loadOrders]); // `loadOrders` will change if `activeFilters` (via `buildPageQuery`) changes.
+  }, [currentPageIndex, loadOrders]); 
 
   useEffect(() => {
     let tempOrders = allOrdersForClientFilter || [];
@@ -230,7 +228,7 @@ export default function OrdersPage() {
     if (currentPageIndex === 0) {
         loadOrders(0, { isRefresh: true });
     } else {
-        setCurrentPageIndex(0); // This will trigger useEffect due to currentPageIndex change, which calls loadOrders
+        setCurrentPageIndex(0); 
     }
   }, [loadOrders, currentPageIndex]);
 
@@ -268,7 +266,7 @@ export default function OrdersPage() {
         title: 'Status Updated',
         description: `Order ${orderId} marked as delivered.`,
       });
-      loadOrders(currentPageIndex, { isRefresh: true }); // Refresh current page
+      loadOrders(currentPageIndex, { isRefresh: true }); 
     } catch (error) {
       console.error("Error updating order status: ", error);
       toast({
@@ -302,7 +300,7 @@ export default function OrdersPage() {
       if (isLastItemOnPage && currentPageIndex > 0) {
         setCurrentPageIndex(prev => prev -1); 
       } else {
-        loadOrders(currentPageIndex, { isRefresh: true }); // Refresh current page
+        loadOrders(currentPageIndex, { isRefresh: true }); 
       }
     } catch (error) {
       console.error("Error deleting order: ", error);
@@ -442,10 +440,10 @@ export default function OrdersPage() {
                       <Label htmlFor="status">Order Status</Label>
                       <Select value={filterStatus} onValueChange={setFilterStatus}>
                         <SelectTrigger id="status">
-                          <SelectValue placeholder="Select status" />
+                          <SelectValue placeholder="All Statuses" /> {/* Changed placeholder */}
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">All Statuses</SelectItem>
+                          {/* Removed SelectItem for "All Statuses" as placeholder handles it */}
                           {ORDER_STATUSES.map(status => (
                             <SelectItem key={status} value={status} className="capitalize">{status}</SelectItem>
                           ))}
@@ -671,4 +669,3 @@ export default function OrdersPage() {
     </>
   );
 }
-
