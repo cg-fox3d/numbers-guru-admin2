@@ -6,21 +6,34 @@ import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
-import { Users, MoreHorizontal, Search as SearchIcon, PackageSearch, RefreshCcw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Users, MoreHorizontal, Search as SearchIcon, PackageSearch, RefreshCcw, Eye, Trash2 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
-import { collection, query, orderBy, Timestamp, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData, QueryConstraint } from 'firebase/firestore';
+import { collection, query, orderBy, Timestamp, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData, QueryConstraint, doc, deleteDoc } from 'firebase/firestore';
 import type { AdminDisplayCustomer } from '@/types';
-import { format } from 'date-fns';
+import { format, isValid } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
-import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { CustomerDetailsDialog } from '@/components/customers/CustomerDetailsDialog';
+
 
 const PAGE_SIZE = 10;
 
@@ -41,14 +54,18 @@ export default function CustomersPage() {
   const observerRef = useRef<IntersectionObserver | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
+  const [selectedCustomerForDetails, setSelectedCustomerForDetails] = useState<AdminDisplayCustomer | null>(null);
+  const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
+  const [customerToDelete, setCustomerToDelete] = useState<AdminDisplayCustomer | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+
   const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null): QueryConstraint[] => {
-    console.log("[CustomersPage] buildPageQuery: Called with cursor:", cursor ? cursor.id : null);
     const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')];
     if (cursor) {
       constraints.push(startAfter(cursor));
     }
     constraints.push(limit(PAGE_SIZE));
-    console.log("[CustomersPage] buildPageQuery: Constraints:", constraints);
     return constraints;
   }, []);
 
@@ -56,7 +73,7 @@ export default function CustomersPage() {
     cursor: QueryDocumentSnapshot<DocumentData> | null = null,
     isRefresh = false
   ) => {
-    console.log(`[CustomersPage] loadCustomers function instance created/called. Cursor: ${cursor ? cursor.id : 'null'}, isRefresh: ${isRefresh}`);
+    console.log(`[CustomersPage] loadCustomers called. Cursor: ${cursor ? 'exists' : 'null'}, isRefresh: ${isRefresh}`);
     if (isLoading && !isRefresh) {
       console.log("[CustomersPage] loadCustomers: Already loading and not a refresh, returning.");
       return;
@@ -64,7 +81,7 @@ export default function CustomersPage() {
 
     setIsLoading(true);
     if (isRefresh) {
-      console.log("[CustomersPage] loadCustomers: Refresh triggered. Setting isInitialLoading=true.");
+      console.log("[CustomersPage] loadCustomers: Refresh triggered.");
       setIsInitialLoading(true);
       setSearchTerm(''); 
     }
@@ -79,7 +96,7 @@ export default function CustomersPage() {
 
       const queryConstraints = buildPageQuery(cursor);
       const customersQuery = query(collection(db, 'users'), ...queryConstraints);
-      console.log("[CustomersPage] loadCustomers: Executing Firestore query...");
+      console.log("[CustomersPage] loadCustomers: Executing Firestore query with constraints:", queryConstraints);
       
       const documentSnapshots = await getDocs(customersQuery);
       const fetchedCustomersBatch: AdminDisplayCustomer[] = [];
@@ -88,11 +105,12 @@ export default function CustomersPage() {
       documentSnapshots.docs.forEach((docSn) => {
         fetchedCustomersBatch.push({ id: docSn.id, ...docSn.data() } as AdminDisplayCustomer);
       });
-
-      if (isRefresh || !cursor) { 
+      
+      if (isRefresh || !cursor) {
         setAllCustomers(fetchedCustomersBatch);
-        console.log("[CustomersPage] loadCustomers: Initial load/refresh. All customers set:", fetchedCustomersBatch);
-      } else { 
+        setFirstVisibleDoc(documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null);
+        console.log("[CustomersPage] loadCustomers: Initial load/refresh. All customers set:", fetchedCustomersBatch.length);
+      } else {
         setAllCustomers(prevCustomers => {
           const newCustomers = [...prevCustomers, ...fetchedCustomersBatch];
           console.log(`[CustomersPage] loadCustomers: Appending customers. Prev count: ${prevCustomers.length}, New batch count: ${fetchedCustomersBatch.length}, Total: ${newCustomers.length}`);
@@ -102,13 +120,8 @@ export default function CustomersPage() {
       
       const newLastVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null;
       setLastVisibleDoc(newLastVisibleDoc);
-
-      if (isRefresh || !cursor) {
-        setFirstVisibleDoc(documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null);
-      }
-      
       setHasMore(documentSnapshots.docs.length === PAGE_SIZE);
-      console.log(`[CustomersPage] loadCustomers: Updated lastVisibleDoc: ${newLastVisibleDoc ? newLastVisibleDoc.id : 'null'}, hasMore: ${documentSnapshots.docs.length === PAGE_SIZE}`);
+      console.log(`[CustomersPage] loadCustomers: Updated lastVisibleDoc: ${newLastVisibleDoc ? 'exists' : 'null'}, hasMore: ${documentSnapshots.docs.length === PAGE_SIZE}`);
 
     } catch (error) {
       console.error("[CustomersPage] loadCustomers: Error fetching customers: ", error);
@@ -124,19 +137,20 @@ export default function CustomersPage() {
         setIsInitialLoading(false);
         console.log("[CustomersPage] loadCustomers: Refresh finished. isInitialLoading=false, isLoading=false.");
       } else {
-        console.log("[CustomersPage] loadCustomers: Load more finished. isLoading=false.");
+         console.log("[CustomersPage] loadCustomers: Load more finished. isLoading=false.");
       }
     }
-  }, [buildPageQuery, toast]); // MINIMAL STABLE DEPENDENCIES for loadCustomers
+  }, [toast, buildPageQuery]); 
+
 
   useEffect(() => {
     console.log("[CustomersPage] Initial useEffect: Triggering loadCustomers for initial load/refresh.");
-    loadCustomers(null, true); // Initial fetch and refresh
-  }, [loadCustomers]); // loadCustomers dependency should now be stable
+    loadCustomers(null, true); 
+  }, [loadCustomers]);
 
   useEffect(() => {
     const lowercasedFilter = searchTerm.toLowerCase();
-    const currentCustomers = allCustomers || []; // Ensure currentCustomers is always an array
+    const currentCustomers = allCustomers || []; 
     if (searchTerm === '') {
       setFilteredCustomers(currentCustomers);
     } else {
@@ -159,7 +173,7 @@ export default function CustomersPage() {
     }
     if (isLoading || !hasMore) {
       console.log(`[CustomersPage] IntersectionObserver useEffect: Not observing. isLoading: ${isLoading}, hasMore: ${hasMore}`);
-      if (currentObserver) currentObserver.unobserve(currentLoadMoreRef); // Use unobserve for specific element
+      if (currentObserver) currentObserver.unobserve(currentLoadMoreRef);
       return;
     }
     console.log("[CustomersPage] IntersectionObserver useEffect: Setting up observer.");
@@ -180,7 +194,7 @@ export default function CustomersPage() {
     return () => {
       console.log("[CustomersPage] IntersectionObserver useEffect: Cleaning up observer.");
       if (observerInstance && currentLoadMoreRef) {
-        observerInstance.unobserve(currentLoadMoreRef); // Use unobserve for specific element
+        observerInstance.unobserve(currentLoadMoreRef);
       }
     };
   }, [isLoading, hasMore, lastVisibleDoc, loadCustomers]);
@@ -191,7 +205,56 @@ export default function CustomersPage() {
     loadCustomers(null, true);
   }, [loadCustomers]);
 
-  const displayCustomers = filteredCustomers; // Use client-side filtered list
+  const openDetailsDialog = useCallback((customer: AdminDisplayCustomer) => {
+    setSelectedCustomerForDetails(customer);
+    setIsDetailsDialogOpen(true);
+  }, []);
+
+  const closeDetailsDialog = useCallback(() => {
+    setIsDetailsDialogOpen(false);
+    setSelectedCustomerForDetails(null);
+  }, []);
+
+  const openDeleteConfirmDialog = useCallback((customer: AdminDisplayCustomer) => {
+    setCustomerToDelete(customer);
+  }, []);
+
+  const closeDeleteConfirmDialog = useCallback(() => {
+    setCustomerToDelete(null);
+  }, []);
+
+  const handleDeleteCustomer = async () => {
+    if (!customerToDelete || !customerToDelete.id) return;
+    setIsDeleting(true);
+    try {
+      await deleteDoc(doc(db, 'users', customerToDelete.id));
+      toast({
+        title: 'Customer Firestore Record Deleted',
+        description: `Customer "${customerToDelete.name || customerToDelete.email}" record deleted from Firestore. Firebase Auth user must be deleted separately via backend.`,
+      });
+      // Optimistic update of the local list
+      setAllCustomers(prev => prev.filter(c => c.id !== customerToDelete!.id));
+      if (allCustomers.length -1 < PAGE_SIZE && !hasMore && (allCustomers.length -1 > 0) ) {
+         // If page might become empty or no more items, try to fetch to ensure UI is consistent
+      } else if (allCustomers.length -1 === 0 && !hasMore) {
+        // If it was the last item overall
+      }
+      // Consider a more robust refresh if the list is now empty for the current "page"
+      // For now, simple optimistic removal. A full refresh might be too disruptive.
+    } catch (error) {
+      console.error("Error deleting customer Firestore record: ", error);
+      toast({
+        title: 'Deletion Failed',
+        description: (error as Error).message || 'Could not delete the customer Firestore record.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeleting(false);
+      closeDeleteConfirmDialog();
+    }
+  };
+
+  const displayCustomers = filteredCustomers || [];
 
   return (
     <>
@@ -199,7 +262,7 @@ export default function CustomersPage() {
         title="Customers Management"
         description="View and search customer information from the 'users' collection. Check console for Firestore index errors or logs."
         actions={
-          <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading}>
+          <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading || isDeleting}>
             <RefreshCcw className="h-4 w-4" />
             <span className="sr-only">Refresh</span>
           </Button>
@@ -216,6 +279,7 @@ export default function CustomersPage() {
               <CardDescription>
                 Displaying users from the Firestore 'users' collection. Scroll to load more.
                 An index on 'users' for 'createdAt' (descending) may be required by Firestore. Check console.
+                Deleting a customer here only removes their Firestore record; Firebase Auth deletion requires a backend function.
               </CardDescription>
             </div>
           </div>
@@ -287,7 +351,7 @@ export default function CustomersPage() {
                         <TableCell>{customer.email}</TableCell>
                         <TableCell>{customer.name || 'N/A'}</TableCell>
                         <TableCell>
-                          {customer.createdAt instanceof Timestamp
+                          {customer.createdAt instanceof Timestamp && isValid(customer.createdAt.toDate())
                             ? format(customer.createdAt.toDate(), 'PPp')
                             : typeof customer.createdAt === 'string'
                               ? customer.createdAt
@@ -296,16 +360,20 @@ export default function CustomersPage() {
                         <TableCell className="text-right">
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" className="h-8 w-8 p-0" disabled>
+                              <Button variant="ghost" className="h-8 w-8 p-0" disabled={isDeleting}>
                                 <span className="sr-only">Open menu</span>
                                 <MoreHorizontal className="h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem disabled>View Details</DropdownMenuItem>
-                              <DropdownMenuItem disabled>Edit Customer</DropdownMenuItem>
-                              <DropdownMenuItem disabled className="text-destructive focus:text-destructive focus:bg-destructive/10">
-                                Delete Customer
+                              <DropdownMenuItem onClick={() => openDetailsDialog(customer)}><Eye className="mr-2 h-4 w-4" /> View Details</DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem 
+                                onClick={() => openDeleteConfirmDialog(customer)} 
+                                className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                                disabled={isDeleting}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" /> Delete Firestore Record
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -322,7 +390,38 @@ export default function CustomersPage() {
             </ScrollArea>
         </CardContent>
       </Card>
+
+      {isDetailsDialogOpen && selectedCustomerForDetails && (
+        <CustomerDetailsDialog 
+            isOpen={isDetailsDialogOpen} 
+            onClose={closeDetailsDialog} 
+            customer={selectedCustomerForDetails} 
+        />
+      )}
+
+      {customerToDelete && (
+        <AlertDialog open={!!customerToDelete} onOpenChange={(open) => !open && closeDeleteConfirmDialog()}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action will delete the customer record for "{customerToDelete.name || customerToDelete.email}" from Firestore. 
+                This does NOT delete the user from Firebase Authentication, which must be done separately via a backend function.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={closeDeleteConfirmDialog} disabled={isDeleting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction 
+                onClick={handleDeleteCustomer} 
+                disabled={isDeleting} 
+                className="bg-destructive hover:bg-destructive/90"
+              >
+                {isDeleting ? "Deleting..." : "Yes, delete Firestore record"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </>
   );
 }
-

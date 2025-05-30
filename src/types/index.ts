@@ -69,10 +69,15 @@ export interface Customer {
 }
 
 export interface AdminDisplayCustomer {
-  id: string; 
+  id: string; // Firestore document ID, which should be the Firebase Auth UID
   email: string;
-  name?: string; 
-  createdAt: Timestamp; 
+  name?: string | null; // Can be optional or null
+  createdAt: Timestamp; // Registration date or when the Firestore record was created
+  // Add any other fields you store in your 'users' collection and want to display
+  // For example:
+  // lastLoginAt?: Timestamp;
+  // phone?: string;
+  // address?: string;
 }
 
 export interface AdminOrder {
@@ -80,7 +85,7 @@ export interface AdminOrder {
   orderId: string; 
   customerName: string;
   customerEmail: string;
-  customerId: string;
+  customerId: string; // UID of the customer
   orderDate: Timestamp;
   amount: number;
   currency: string;
@@ -93,12 +98,12 @@ export interface AdminOrder {
   notes?: {
     email?: string;
     itemCount?: number;
-    itemDetails?: string;
+    itemDetails?: string; // This seems to be the same as `items` in the main structure.
     name?: string;
     selectedOriginalVipNumberIds?: string[];
     [key: string]: any; 
   };
-  userId?: string;
+  userId?: string; // This is likely the same as customerId
   paymentId?: string;
   receipt?: string;
 }
@@ -112,7 +117,7 @@ export interface Transaction {
   status: string; 
   method?: string; 
   email?: string; 
-  userId?: string;
+  userId?: string; // Firebase Auth UID of the user associated with the transaction
   provider?: string; 
   razorpaySignature?: string;
   verified?: boolean;
@@ -141,3 +146,11 @@ export interface DashboardStats {
   productsInStock: number;
 }
 
+export interface ProductActiveFilters {
+  dateFrom?: Date;
+  dateTo?: Date;
+  status?: string;
+  categorySlug?: string;
+  minPrice?: number;
+  maxPrice?: number;
+}
