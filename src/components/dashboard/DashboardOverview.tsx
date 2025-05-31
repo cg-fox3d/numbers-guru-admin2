@@ -69,6 +69,23 @@ export function DashboardOverview() {
         const usersCol = collection(db, 'users');
         const refundsCol = collection(db, 'refunds');
 
+        // Fetch Total Revenue from external API
+        let fetchedTotalRevenue = 0;
+        try {
+          const revenueResponse = await fetch("https://numbers-guru.netlify.app/.netlify/functions/get-total-revenue");
+          if (!revenueResponse.ok) {
+            console.error("Failed to fetch total revenue:", revenueResponse.status, await revenueResponse.text());
+            // Keep fetchedTotalRevenue as 0 or handle error appropriately
+          } else {
+            const revenueData = await revenueResponse.json();
+            fetchedTotalRevenue = revenueData.totalRevenue || 0;
+          }
+        } catch (apiError) {
+            console.error("Error fetching total revenue from API:", apiError);
+            // Keep fetchedTotalRevenue as 0 or handle error appropriately
+        }
+
+
         // Products in Stock
         const availableVipNumbersQuery = query(vipNumbersCol, where('status', '==', 'available'));
         const availableNumberPacksQuery = query(numberPacksCol, where('status', '==', 'available'));
@@ -76,14 +93,6 @@ export function DashboardOverview() {
         const numberPacksSnapshot = await getCountFromServer(availableNumberPacksQuery);
         const vipNumbersInStock = vipNumbersSnapshot.data().count;
         const numberPacksInStock = numberPacksSnapshot.data().count;
-
-        // Total Revenue (from 'paid' or 'delivered' orders)
-        const revenueOrdersQuery = query(ordersCol, where('orderStatus', 'in', ['paid', 'delivered']));
-        const revenueOrdersDocs = await getDocs(revenueOrdersQuery);
-        let totalRevenue = 0;
-        revenueOrdersDocs.forEach(doc => {
-          totalRevenue += (doc.data() as AdminOrder).amount || 0;
-        });
         
         // Orders This Month
         const currentDate = new Date();
@@ -125,7 +134,7 @@ export function DashboardOverview() {
         }
 
         setStats({
-          totalRevenue,
+          totalRevenue: fetchedTotalRevenue,
           newCustomersThisMonth,
           ordersThisMonth,
           vipNumbersInStock,
@@ -148,7 +157,7 @@ export function DashboardOverview() {
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard title="Total Revenue" value={`₹${stats.totalRevenue.toLocaleString()}`} icon={DollarSign} isLoading={isLoading} description="From 'paid' or 'delivered' orders" />
+        <StatCard title="Total Revenue" value={`₹${stats.totalRevenue.toLocaleString()}`} icon={DollarSign} isLoading={isLoading} description="From pre-calculated API source" />
         <StatCard title="Orders This Month" value={stats.ordersThisMonth} icon={ShoppingBag} isLoading={isLoading} />
         <StatCard title="New Customers This Month" value={stats.newCustomersThisMonth} icon={Users} isLoading={isLoading} description="Based on user registration date" />
         <StatCard title="Total Customers" value={stats.totalCustomers} icon={Users} isLoading={isLoading} />
@@ -238,7 +247,7 @@ export function DashboardOverview() {
         </CardHeader>
         <CardContent>
           <CardDescription>
-            This dashboard provides an overview of key metrics. For very large datasets, some calculations (like total revenue) might benefit from backend aggregation for optimal performance. Ensure Firestore indexes are configured for date fields used in queries.
+            This dashboard provides an overview of key metrics. For very large datasets, some calculations (like total revenue) might benefit from backend aggregation for optimal performance. Ensure Firestore indexes are configured for date fields used in queries. Total Revenue is now fetched from your API.
           </CardDescription>
         </CardContent>
       </Card>
