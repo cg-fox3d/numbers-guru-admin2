@@ -241,16 +241,21 @@ export function DashboardOverview() {
           </CardContent>
         </Card>
       </div>
-       <Card className="shadow-md">
+       <Card className="shadow-md mt-6">
         <CardHeader>
-          <CardTitle>Developer Note</CardTitle>
+          <CardTitle>Developer Note: Data Fetching & Costs</CardTitle>
         </CardHeader>
         <CardContent>
           <CardDescription>
-            This dashboard provides an overview of key metrics. For very large datasets, some calculations (like total revenue) might benefit from backend aggregation for optimal performance. Ensure Firestore indexes are configured for date fields used in queries. Total Revenue is now fetched from your API.
+            This dashboard currently performs approximately 13 Firestore document reads per load (mostly efficient <code>getCountFromServer</code> calls). 
+            Total Revenue is fetched from an external API, saving Firestore reads here.
+            For typical admin usage, this is cost-effective. 
+            If this dashboard sees extremely high traffic in the future, consider implementing backend aggregation of these stats (e.g., via a Cloud Function updating a single summary document) to reduce reads to 1 per dashboard load.
+            Always ensure Firestore indexes are configured for date fields and any fields used in <code>where</code> clauses for optimal performance and to prevent higher costs from unindexed queries.
           </CardDescription>
         </CardContent>
       </Card>
     </div>
   );
 }
+
