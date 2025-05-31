@@ -140,7 +140,7 @@ export default function TransactionsPage() {
       console.error("Error fetching transactions: ", error);
       toast({
         title: 'Error Fetching Transactions',
-        description: (error as Error).message || 'Could not load transactions. Check Firestore indexes for "payments" collection (createdAt desc, status, method, date combinations).',
+        description: (error as Error).message || 'Could not load transactions.',
         variant: 'destructive',
       });
       setHasMore(false);
@@ -286,7 +286,7 @@ export default function TransactionsPage() {
     <>
       <PageHeader
         title="Transaction Log"
-        description="View and filter payment transactions from the 'payments' collection. Check console for Firestore index errors."
+        description="View and filter payment transactions."
         actions={
            <div className="flex items-center gap-2">
              <Popover open={isFilterPopoverOpen} onOpenChange={setIsFilterPopoverOpen}>
@@ -386,7 +386,6 @@ export default function TransactionsPage() {
               </CardTitle>
               <CardDescription>
                 Browse payment transactions. Scroll to load more.
-                An index on 'payments' for 'createdAt' (desc) and potentially other filters (status, method, date) may be required. Check console for errors.
               </CardDescription>
             </div>
           </div>
@@ -426,7 +425,7 @@ export default function TransactionsPage() {
                   {searchTerm || getActiveFilterCount() > 0 ? 'No Transactions Match Your Search/Filters' : 'No Transactions Found'}
                 </h3>
                 <p className="text-muted-foreground">
-                  {searchTerm || getActiveFilterCount() > 0 ? 'Try different criteria or clear search/filters.' : "The 'payments' collection might be empty or there was an issue fetching data (check console for index errors)."}
+                  {searchTerm || getActiveFilterCount() > 0 ? 'Try different criteria or clear search/filters.' : "There might be no transaction data or there was an issue fetching it."}
                 </p>
                  {(searchTerm || getActiveFilterCount() > 0) && (
                     <Button onClick={() => { setSearchTerm(''); handleClearFilters(); }} variant="outline" className="mt-4">Clear Search & Filters</Button>

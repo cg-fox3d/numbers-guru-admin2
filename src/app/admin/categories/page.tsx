@@ -139,7 +139,7 @@ export default function CategoriesPage() {
       console.error("Error fetching categories: ", error);
       toast({
         title: 'Error Fetching Categories',
-        description: (error as Error).message || 'Could not load categories. Check Firestore indexes for order, createdAt, and type combinations.',
+        description: (error as Error).message || 'Could not load categories.',
         variant: 'destructive',
       });
       setHasMore(false);
@@ -282,7 +282,7 @@ export default function CategoriesPage() {
     <>
       <PageHeader
         title="Categories Management"
-        description="Manage product categories for your shop. Check console for Firestore index errors."
+        description="Manage product categories for your shop."
         actions={
           <div className="flex items-center gap-2">
              <Popover open={isFilterPopoverOpen} onOpenChange={setIsFilterPopoverOpen}>
@@ -381,7 +381,6 @@ export default function CategoriesPage() {
           </CardTitle>
           <CardDescription>
             View, add, edit, and delete categories. Scroll to load more.
-            A Firestore index on 'categories' for 'order' (ASC) then 'createdAt' (DESC) is required. Other indexes for filters may be needed.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">

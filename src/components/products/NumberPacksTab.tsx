@@ -148,7 +148,7 @@ export function NumberPacksTab({ categoryMap, activeFilters }: NumberPacksTabPro
       console.error("Error fetching number packs: ", error);
       toast({
         title: 'Error Fetching Number Packs',
-        description: (error as Error).message || 'Could not load number packs. Check Firestore indexes and console for errors.',
+        description: (error as Error).message || 'Could not load number packs.',
         variant: 'destructive',
       });
       setHasMore(false);
@@ -283,7 +283,7 @@ export function NumberPacksTab({ categoryMap, activeFilters }: NumberPacksTabPro
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <CardTitle>Number Packs List</CardTitle>
-            <CardDescription>Browse and manage number pack bundles. Filters from above apply. Check console for Firestore index errors.</CardDescription>
+            <CardDescription>Browse and manage number pack bundles. Filters from above apply.</CardDescription>
           </div>
           <div className="flex items-center gap-2">
             <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading || isInitialLoading}>

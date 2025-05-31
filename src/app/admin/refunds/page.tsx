@@ -88,7 +88,7 @@ export default function RefundsPage() {
       console.error("Error fetching refunds: ", error);
       toast({
         title: 'Error Fetching Refunds',
-        description: (error as Error).message || 'Could not load refunds. Check Firestore indexes for "refunds" collection, ordered by "createdAt" (desc).',
+        description: (error as Error).message || 'Could not load refunds.',
         variant: 'destructive',
       });
       setHasMore(false);
@@ -173,7 +173,7 @@ export default function RefundsPage() {
     <>
       <PageHeader
         title="Refund Log"
-        description="View refund records from the 'refunds' collection. Ordered by 'createdAt' (desc). Check console for index errors."
+        description="View refund records."
         actions={
           <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading || isInitialLoading}>
             <RefreshCcw className="h-4 w-4" />
@@ -191,7 +191,6 @@ export default function RefundsPage() {
               </CardTitle>
               <CardDescription>
                 Browse refund records. Scroll to load more.
-                An index on 'refunds' for 'createdAt' (descending) may be required by Firestore.
               </CardDescription>
             </div>
           </div>
@@ -241,7 +240,7 @@ export default function RefundsPage() {
                   {searchTerm ? 'No Refunds Match Your Search' : 'No Refunds Found'}
                 </h3>
                 <p className="text-muted-foreground">
-                  {searchTerm ? 'Try a different search term.' : "The 'refunds' collection might be empty or there was an issue fetching data."}
+                  {searchTerm ? 'Try a different search term.' : "There might be no refund data or there was an issue fetching it."}
                 </p>
               </div>
             ) : (

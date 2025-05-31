@@ -144,7 +144,7 @@ export function VipNumbersTab({ categoryMap, activeFilters }: VipNumbersTabProps
       console.error("Error fetching VIP numbers: ", error);
       toast({
         title: 'Error Fetching VIP Numbers',
-        description: (error as Error).message || 'Could not load VIP numbers. Check Firestore indexes for createdAt, status, categorySlug.',
+        description: (error as Error).message || 'Could not load VIP numbers.',
         variant: 'destructive',
       });
       setHasMore(false); 
@@ -263,7 +263,7 @@ export function VipNumbersTab({ categoryMap, activeFilters }: VipNumbersTabProps
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <CardTitle>VIP Numbers List</CardTitle>
-            <CardDescription>Browse and manage individual VIP mobile numbers. Filters from above apply. Check console for Firestore index errors.</CardDescription>
+            <CardDescription>Browse and manage individual VIP mobile numbers. Filters from above apply.</CardDescription>
           </div>
           <div className="flex items-center gap-2">
             <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading || isInitialLoading}>

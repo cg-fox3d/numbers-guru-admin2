@@ -161,7 +161,7 @@ export default function OrdersPage() {
       console.error("Error fetching orders: ", error);
       toast({
         title: 'Error Fetching Orders',
-        description: (error as Error).message || 'Could not load orders. Check console for details & ensure Firestore indexes are set up for current filters.',
+        description: (error as Error).message || 'Could not load orders.',
         variant: 'destructive',
       });
       setHasMore(false);
@@ -360,7 +360,7 @@ useEffect(() => {
     <>
       <PageHeader
         title="Orders Management"
-        description="View, filter, and manage customer orders. CHECK BROWSER CONSOLE FOR FIRESTORE INDEX ERRORS."
+        description="View, filter, and manage customer orders."
         actions={
           <div className="flex items-center gap-2">
             <Popover open={isFilterPopoverOpen} onOpenChange={setIsFilterPopoverOpen}>
@@ -456,8 +456,7 @@ useEffect(() => {
                 <span>Orders List</span>
               </CardTitle>
               <CardDescription>
-                Browse customer orders. Scroll to load more. Indexes on 'orderDate' (desc), 'orderStatus', and combinations might be required by Firestore.
-                PLEASE CHECK BROWSER CONSOLE FOR FIRESTORE INDEX ERRORS.
+                Browse customer orders. Scroll to load more.
               </CardDescription>
             </div>
           </div>
@@ -497,7 +496,7 @@ useEffect(() => {
                   {searchTerm || getActiveFilterCount() > 0 ? 'No Orders Match Your Search/Filters' : 'No Orders Found'}
                 </h3>
                 <p className="text-muted-foreground">
-                  {searchTerm || getActiveFilterCount() > 0 ? 'Try different criteria or clear search/filters.' : "The 'orders' collection might be empty or there was an issue fetching data (check console for index errors)."}
+                  {searchTerm || getActiveFilterCount() > 0 ? 'Try different criteria or clear search/filters.' : "There might be no orders or there was an issue fetching data."}
                 </p>
                 {(searchTerm || getActiveFilterCount() > 0) && (
                     <Button onClick={() => { setSearchTerm(''); handleClearFilters(); }} variant="outline" className="mt-4">Clear Search & Filters</Button>

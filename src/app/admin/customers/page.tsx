@@ -119,7 +119,7 @@ export default function CustomersPage() {
       console.error("Error fetching customers: ", error);
       toast({
         title: 'Error Fetching Customers',
-        description: (error as Error).message || 'Could not load customer data. An index on \'users\' for \'createdAt\' (desc) might be required.',
+        description: (error as Error).message || 'Could not load customer data.',
         variant: 'destructive',
       });
       setHasMore(false); 
@@ -211,15 +211,15 @@ export default function CustomersPage() {
     try {
       await deleteDoc(doc(db, 'users', customerToDelete.id));
       toast({
-        title: 'Customer Firestore Record Deleted',
-        description: `Customer "${customerToDelete.name || customerToDelete.email}" record deleted from Firestore. Firebase Auth user must be deleted separately via backend.`,
+        title: 'Customer Record Deleted',
+        description: `Customer "${customerToDelete.name || customerToDelete.email}" record deleted. Full account deletion requires separate backend action.`,
       });
       setAllCustomers(prev => prev.filter(c => c.id !== customerToDelete!.id));
     } catch (error) {
-      console.error("Error deleting customer Firestore record: ", error);
+      console.error("Error deleting customer record: ", error);
       toast({
         title: 'Deletion Failed',
-        description: (error as Error).message || 'Could not delete the customer Firestore record.',
+        description: (error as Error).message || 'Could not delete the customer record.',
         variant: 'destructive',
       });
     } finally {
@@ -234,7 +234,7 @@ export default function CustomersPage() {
     <>
       <PageHeader
         title="Customers Management"
-        description="View and search customer information from the 'users' collection. Check console for Firestore index errors or logs."
+        description="View and search customer information."
         actions={
           <Button onClick={handleRefresh} variant="outline" size="icon" disabled={isLoading || isDeleting}>
             <RefreshCcw className="h-4 w-4" />
@@ -251,9 +251,8 @@ export default function CustomersPage() {
                 <span>Customer List</span>
               </CardTitle>
               <CardDescription>
-                Displaying users from the Firestore 'users' collection. Scroll to load more.
-                An index on 'users' for 'createdAt' (descending) may be required by Firestore.
-                Deleting a customer here only removes their Firestore record; Firebase Auth deletion requires a backend function.
+                Displaying users from the system. Scroll to load more.
+                Deleting a customer here only removes their record; full account deletion requires additional backend processing.
               </CardDescription>
             </div>
           </div>
@@ -301,7 +300,7 @@ export default function CustomersPage() {
                     {searchTerm ? 'No Customers Match Your Search' : 'No Customers Found'}
                   </h3>
                   <p className="text-muted-foreground">
-                    {searchTerm ? 'Try a different search term or clear search.' : "The 'users' collection might be empty or there was an issue fetching data."}
+                    {searchTerm ? 'Try a different search term or clear search.' : "There might be no customer data or there was an issue fetching it."}
                   </p>
                    {searchTerm && (
                     <Button onClick={() => setSearchTerm('')} variant="outline" className="mt-4">Clear Search</Button>
@@ -347,7 +346,7 @@ export default function CustomersPage() {
                                 className="text-destructive focus:text-destructive focus:bg-destructive/10"
                                 disabled={isDeleting}
                               >
-                                <Trash2 className="mr-2 h-4 w-4" /> Delete Firestore Record
+                                <Trash2 className="mr-2 h-4 w-4" /> Delete Record
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -379,8 +378,8 @@ export default function CustomersPage() {
             <AlertDialogHeader>
               <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
               <AlertDialogDescription>
-                This action will delete the customer record for "{customerToDelete.name || customerToDelete.email}" from Firestore. 
-                This does NOT delete the user from Firebase Authentication, which must be done separately via a backend function.
+                This action will delete the customer record for "{customerToDelete.name || customerToDelete.email}" from the system. 
+                This does NOT delete their account access, which must be done separately through backend processing.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -390,7 +389,7 @@ export default function CustomersPage() {
                 disabled={isDeleting} 
                 className="bg-destructive hover:bg-destructive/90"
               >
-                {isDeleting ? "Deleting..." : "Yes, delete Firestore record"}
+                {isDeleting ? "Deleting..." : "Yes, delete record"}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
