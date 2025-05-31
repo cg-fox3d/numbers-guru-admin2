@@ -73,15 +73,12 @@ export default function CustomersPage() {
     cursor: QueryDocumentSnapshot<DocumentData> | null = null,
     isRefresh = false
   ) => {
-    console.log(`[CustomersPage] loadCustomers called. Cursor: ${cursor ? 'exists' : 'null'}, isRefresh: ${isRefresh}`);
     if (isLoading && !isRefresh) {
-      console.log("[CustomersPage] loadCustomers: Already loading and not a refresh, returning.");
       return;
     }
 
     setIsLoading(true);
     if (isRefresh) {
-      console.log("[CustomersPage] loadCustomers: Refresh triggered.");
       setIsInitialLoading(true);
       setSearchTerm(''); 
     }
@@ -96,11 +93,9 @@ export default function CustomersPage() {
 
       const queryConstraints = buildPageQuery(cursor);
       const customersQuery = query(collection(db, 'users'), ...queryConstraints);
-      console.log("[CustomersPage] loadCustomers: Executing Firestore query with constraints:", queryConstraints);
       
       const documentSnapshots = await getDocs(customersQuery);
       const fetchedCustomersBatch: AdminDisplayCustomer[] = [];
-      console.log(`[CustomersPage] loadCustomers: Firestore query returned ${documentSnapshots.docs.length} documents.`);
       
       documentSnapshots.docs.forEach((docSn) => {
         fetchedCustomersBatch.push({ id: docSn.id, ...docSn.data() } as AdminDisplayCustomer);
@@ -109,11 +104,9 @@ export default function CustomersPage() {
       if (isRefresh || !cursor) {
         setAllCustomers(fetchedCustomersBatch);
         setFirstVisibleDoc(documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null);
-        console.log("[CustomersPage] loadCustomers: Initial load/refresh. All customers set:", fetchedCustomersBatch.length);
       } else {
         setAllCustomers(prevCustomers => {
           const newCustomers = [...prevCustomers, ...fetchedCustomersBatch];
-          console.log(`[CustomersPage] loadCustomers: Appending customers. Prev count: ${prevCustomers.length}, New batch count: ${fetchedCustomersBatch.length}, Total: ${newCustomers.length}`);
           return newCustomers;
         });
       }
@@ -121,10 +114,9 @@ export default function CustomersPage() {
       const newLastVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null;
       setLastVisibleDoc(newLastVisibleDoc);
       setHasMore(documentSnapshots.docs.length === PAGE_SIZE);
-      console.log(`[CustomersPage] loadCustomers: Updated lastVisibleDoc: ${newLastVisibleDoc ? 'exists' : 'null'}, hasMore: ${documentSnapshots.docs.length === PAGE_SIZE}`);
 
     } catch (error) {
-      console.error("[CustomersPage] loadCustomers: Error fetching customers: ", error);
+      console.error("Error fetching customers: ", error);
       toast({
         title: 'Error Fetching Customers',
         description: (error as Error).message || 'Could not load customer data. An index on \'users\' for \'createdAt\' (desc) might be required.',
@@ -135,16 +127,12 @@ export default function CustomersPage() {
       setIsLoading(false);
       if (isRefresh) {
         setIsInitialLoading(false);
-        console.log("[CustomersPage] loadCustomers: Refresh finished. isInitialLoading=false, isLoading=false.");
-      } else {
-         console.log("[CustomersPage] loadCustomers: Load more finished. isLoading=false.");
       }
     }
   }, [toast, buildPageQuery]); 
 
 
   useEffect(() => {
-    console.log("[CustomersPage] Initial useEffect: Triggering loadCustomers for initial load/refresh.");
     loadCustomers(null, true); 
   }, [loadCustomers]);
 
@@ -168,20 +156,16 @@ export default function CustomersPage() {
     const currentLoadMoreRef = loadMoreRef.current;
 
     if (!currentLoadMoreRef) {
-      console.log("[CustomersPage] IntersectionObserver useEffect: loadMoreRef.current is null, returning.");
       return;
     }
     if (isLoading || !hasMore) {
-      console.log(`[CustomersPage] IntersectionObserver useEffect: Not observing. isLoading: ${isLoading}, hasMore: ${hasMore}`);
       if (currentObserver) currentObserver.unobserve(currentLoadMoreRef);
       return;
     }
-    console.log("[CustomersPage] IntersectionObserver useEffect: Setting up observer.");
 
     const observerInstance = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && lastVisibleDoc && !isLoading && hasMore) { 
-          console.log("[CustomersPage] IntersectionObserver: Sentinel intersected! Loading more customers.");
           loadCustomers(lastVisibleDoc, false);
         }
       },
@@ -192,7 +176,6 @@ export default function CustomersPage() {
     observerRef.current = observerInstance; 
 
     return () => {
-      console.log("[CustomersPage] IntersectionObserver useEffect: Cleaning up observer.");
       if (observerInstance && currentLoadMoreRef) {
         observerInstance.unobserve(currentLoadMoreRef);
       }
@@ -201,7 +184,6 @@ export default function CustomersPage() {
 
 
   const handleRefresh = useCallback(() => {
-    console.log("[CustomersPage] handleRefresh: Called.");
     loadCustomers(null, true);
   }, [loadCustomers]);
 
@@ -232,15 +214,7 @@ export default function CustomersPage() {
         title: 'Customer Firestore Record Deleted',
         description: `Customer "${customerToDelete.name || customerToDelete.email}" record deleted from Firestore. Firebase Auth user must be deleted separately via backend.`,
       });
-      // Optimistic update of the local list
       setAllCustomers(prev => prev.filter(c => c.id !== customerToDelete!.id));
-      if (allCustomers.length -1 < PAGE_SIZE && !hasMore && (allCustomers.length -1 > 0) ) {
-         // If page might become empty or no more items, try to fetch to ensure UI is consistent
-      } else if (allCustomers.length -1 === 0 && !hasMore) {
-        // If it was the last item overall
-      }
-      // Consider a more robust refresh if the list is now empty for the current "page"
-      // For now, simple optimistic removal. A full refresh might be too disruptive.
     } catch (error) {
       console.error("Error deleting customer Firestore record: ", error);
       toast({
@@ -278,7 +252,7 @@ export default function CustomersPage() {
               </CardTitle>
               <CardDescription>
                 Displaying users from the Firestore 'users' collection. Scroll to load more.
-                An index on 'users' for 'createdAt' (descending) may be required by Firestore. Check console.
+                An index on 'users' for 'createdAt' (descending) may be required by Firestore.
                 Deleting a customer here only removes their Firestore record; Firebase Auth deletion requires a backend function.
               </CardDescription>
             </div>
@@ -327,7 +301,7 @@ export default function CustomersPage() {
                     {searchTerm ? 'No Customers Match Your Search' : 'No Customers Found'}
                   </h3>
                   <p className="text-muted-foreground">
-                    {searchTerm ? 'Try a different search term or clear search.' : "The 'users' collection might be empty or there was an issue fetching data (check console for index errors or logs)."}
+                    {searchTerm ? 'Try a different search term or clear search.' : "The 'users' collection might be empty or there was an issue fetching data."}
                   </p>
                    {searchTerm && (
                     <Button onClick={() => setSearchTerm('')} variant="outline" className="mt-4">Clear Search</Button>

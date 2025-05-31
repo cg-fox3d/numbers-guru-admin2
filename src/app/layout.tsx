@@ -1,3 +1,4 @@
+
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
@@ -15,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'NumeroDash',
-  description: 'Admin Dashboard for VIP Number Shop',
+  title: 'NumbersGuru Admin',
+  description: 'Admin Dashboard for NumbersGuru VIP Number Shop',
 };
 
 export default function RootLayout({

@@ -5,7 +5,7 @@ import type { User } from 'firebase/auth';
 import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
 import { useRouter, usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
-import { createContext, useEffect, useState, useCallback } from 'react'; // Added useCallback
+import { createContext, useEffect, useState, useCallback } from 'react'; 
 import { auth } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 
@@ -13,7 +13,7 @@ interface AuthContextType {
   user: User | null;
   isAdmin: boolean;
   loading: boolean;
-  signIn: (email: string, token: string) => Promise<void>; // Placeholder, actual sign-in in LoginForm
+  signIn: (email: string, token: string) => Promise<void>; 
   signOutAndRedirect: () => Promise<void>;
 }
 
@@ -63,7 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(async (email: string, token: string) => {
     // This is a placeholder as actual sign-in is handled by FirebaseUI or custom logic
     // For context update, assuming login component updates Firebase state which onAuthStateChanged catches
-    console.log('AuthContext signIn placeholder:', email, token);
+    // console.log('AuthContext signIn placeholder:', email, token); // Removed console.log
   }, []);
 
   const signOutAndRedirect = useCallback(async () => {
@@ -80,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, [toast, router]); // Dependencies for signOutAndRedirect
+  }, [toast, router]); 
   
 
   return (

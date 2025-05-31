@@ -36,8 +36,6 @@ export interface ProductActiveFilters {
 }
 
 export default function ProductsPage() {
-  console.log("ProductsPage: Rendering"); // TOP LEVEL LOG
-
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryMap, setCategoryMap] = useState<Record<string, string>>({});
   const [isLoadingCategories, setIsLoadingCategories] = useState(true);
@@ -67,9 +65,8 @@ export default function ProductsPage() {
       });
       setCategories(fetchedCategories);
       setCategoryMap(newCategoryMap);
-      console.log("ProductsPage: Categories loaded", fetchedCategories);
     } catch (error) {
-      console.error("ProductsPage: Error fetching categories: ", error);
+      console.error("Error fetching categories: ", error);
       toast({
         title: "Error Fetching Categories",
         description: (error as Error).message || "Could not load categories for product tabs/filters.",
@@ -81,7 +78,6 @@ export default function ProductsPage() {
   }, [toast]);
 
   useEffect(() => {
-    console.log("ProductsPage: useEffect for loadCategories triggered");
     loadCategories();
   }, [loadCategories]);
 
@@ -98,13 +94,11 @@ export default function ProductsPage() {
     const maxPriceNum = parseFloat(filterMaxPrice);
     if (!isNaN(maxPriceNum) && filterMaxPrice.trim() !== '') newActiveFilters.maxPrice = maxPriceNum;
 
-    console.log("ProductsPage: Applying filters", newActiveFilters);
     setActiveFilters(newActiveFilters);
     setIsFilterPopoverOpen(false);
   };
 
   const handleClearFilters = useCallback(() => {
-    console.log("ProductsPage: Clearing filters");
     setFilterDateFrom(undefined);
     setFilterDateTo(undefined);
     setFilterStatus('');
@@ -124,7 +118,6 @@ export default function ProductsPage() {
   };
 
   const handleTabChange = useCallback(() => {
-    console.log("ProductsPage: Tab changed, calling handleClearFilters");
     handleClearFilters();
   }, [handleClearFilters]);
 
@@ -254,4 +247,3 @@ export default function ProductsPage() {
     </>
   );
 }
-    

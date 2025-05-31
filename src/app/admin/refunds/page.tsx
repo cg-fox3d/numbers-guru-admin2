@@ -37,7 +37,7 @@ export default function RefundsPage() {
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null): QueryConstraint[] => {
-    const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')]; // Order by 'createdAt' as refund date
+    const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')]; 
     if (cursor) {
       constraints.push(startAfter(cursor));
     }
@@ -50,13 +50,11 @@ export default function RefundsPage() {
     isRefresh = false
   ) => {
     if (isLoading && !isRefresh) {
-        console.log("[RefundsPage] fetchRefunds: Already loading and not a refresh, returning.");
         return;
     }
     
     setIsLoading(true);
     if (isRefresh) {
-      console.log("[RefundsPage] fetchRefunds: Refresh triggered. Setting isInitialLoading=true.");
       setIsInitialLoading(true);
       setSearchTerm(''); 
     }
@@ -64,11 +62,9 @@ export default function RefundsPage() {
     try {
       const queryConstraints = buildPageQuery(cursor);
       const refundsQuery = query(collection(db, 'refunds'), ...queryConstraints);
-      console.log("[RefundsPage] fetchRefunds: Executing Firestore query with constraints:", queryConstraints);
       
       const documentSnapshots = await getDocs(refundsQuery);
       const fetchedRefundsBatch: Refund[] = [];
-      console.log(`[RefundsPage] fetchRefunds: Firestore query returned ${documentSnapshots.docs.length} documents.`);
       
       documentSnapshots.docs.forEach((docSn) => {
         fetchedRefundsBatch.push({ id: docSn.id, ...docSn.data() } as Refund);
@@ -77,11 +73,9 @@ export default function RefundsPage() {
       if (isRefresh || !cursor) {
         setAllRefunds(fetchedRefundsBatch);
         setFirstVisibleDoc(documentSnapshots.docs.length > 0 ? documentSnapshots.docs[0] : null);
-        console.log("[RefundsPage] fetchRefunds: Initial load/refresh. All refunds set:", fetchedRefundsBatch);
       } else {
         setAllRefunds(prev => {
           const newRefunds = [...prev, ...fetchedRefundsBatch];
-          console.log(`[RefundsPage] fetchRefunds: Appending refunds. Prev count: ${prev.length}, New batch count: ${fetchedRefundsBatch.length}, Total: ${newRefunds.length}`);
           return newRefunds;
         });
       }
@@ -89,10 +83,9 @@ export default function RefundsPage() {
       const newLastVisibleDoc = documentSnapshots.docs.length > 0 ? documentSnapshots.docs[documentSnapshots.docs.length - 1] : null;
       setLastVisibleDoc(newLastVisibleDoc);
       setHasMore(documentSnapshots.docs.length === PAGE_SIZE);
-      console.log(`[RefundsPage] fetchRefunds: Updated lastVisibleDoc: ${newLastVisibleDoc ? newLastVisibleDoc.id : 'null'}, hasMore: ${documentSnapshots.docs.length === PAGE_SIZE}`);
 
     } catch (error) {
-      console.error("[RefundsPage] fetchRefunds: Error fetching refunds: ", error);
+      console.error("Error fetching refunds: ", error);
       toast({
         title: 'Error Fetching Refunds',
         description: (error as Error).message || 'Could not load refunds. Check Firestore indexes for "refunds" collection, ordered by "createdAt" (desc).',
@@ -103,15 +96,11 @@ export default function RefundsPage() {
       setIsLoading(false);
       if (isRefresh) {
         setIsInitialLoading(false);
-        console.log("[RefundsPage] fetchRefunds: Refresh finished. isInitialLoading=false, isLoading=false.");
-      } else {
-        console.log("[RefundsPage] fetchRefunds: Load more finished. isLoading=false.");
       }
     }
-  }, [toast, buildPageQuery]); // Dependencies for fetchRefunds
+  }, [toast, buildPageQuery]); 
 
   useEffect(() => {
-    console.log("[RefundsPage] Initial useEffect: Triggering fetchRefunds for initial load/refresh.");
     fetchRefunds(null, true);
   }, [fetchRefunds]);
 
@@ -125,7 +114,6 @@ export default function RefundsPage() {
         refund.refundId.toLowerCase().includes(lowercasedSearch) ||
         refund.paymentId.toLowerCase().includes(lowercasedSearch) ||
         refund.orderId.toLowerCase().includes(lowercasedSearch)
-        // Add customerEmail search if it becomes part of the Refund type and data
       );
       setFilteredRefunds(searchedData);
     }
@@ -136,20 +124,16 @@ export default function RefundsPage() {
     const currentLoadMoreRef = loadMoreRef.current;
 
     if (!currentLoadMoreRef) {
-      console.log("[RefundsPage] IntersectionObserver useEffect: loadMoreRef.current is null, returning.");
       return;
     }
     if (isLoading || !hasMore) {
-      console.log(`[RefundsPage] IntersectionObserver useEffect: Not observing. isLoading: ${isLoading}, hasMore: ${hasMore}`);
       if (currentObserver) currentObserver.unobserve(currentLoadMoreRef);
       return;
     }
-    console.log("[RefundsPage] IntersectionObserver useEffect: Setting up observer.");
 
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && lastVisibleDoc && !isLoading && hasMore) {
-          console.log("[RefundsPage] IntersectionObserver: Sentinel intersected! Loading more refunds.");
           fetchRefunds(lastVisibleDoc);
         }
       },
@@ -160,7 +144,6 @@ export default function RefundsPage() {
     observerRef.current = observer;
 
     return () => {
-      console.log("[RefundsPage] IntersectionObserver useEffect: Cleaning up observer.");
       if (observer && currentLoadMoreRef) {
         observer.unobserve(currentLoadMoreRef);
       }
@@ -168,7 +151,6 @@ export default function RefundsPage() {
   }, [isLoading, hasMore, lastVisibleDoc, fetchRefunds]);
 
   const handleRefresh = useCallback(() => {
-    console.log("[RefundsPage] handleRefresh: Called.");
     fetchRefunds(null, true);
   }, [fetchRefunds]);
 
@@ -308,4 +290,3 @@ export default function RefundsPage() {
     </>
   );
 }
-

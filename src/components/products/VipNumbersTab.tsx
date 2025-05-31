@@ -44,7 +44,7 @@ export function VipNumbersTab({ categoryMap, activeFilters }: VipNumbersTabProps
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   
   const [lastVisibleDoc, setLastVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
-  const [firstVisibleDoc, setFirstVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null); // For potential future "prev page from specific point" logic
+  const [firstVisibleDoc, setFirstVisibleDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null); 
   const [hasMore, setHasMore] = useState(true);
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -76,7 +76,6 @@ export function VipNumbersTab({ categoryMap, activeFilters }: VipNumbersTabProps
       toDateEnd.setHours(23, 59, 59, 999);
       constraints.push(where('createdAt', '<=', Timestamp.fromDate(toDateEnd)));
     }
-    // Price range filtering is done client-side for now
 
     constraints.push(orderBy('createdAt', 'desc'));
     if (cursor) {
@@ -85,7 +84,7 @@ export function VipNumbersTab({ categoryMap, activeFilters }: VipNumbersTabProps
     constraints.push(limit(PAGE_SIZE));
     
     return query(collection(db, 'vipNumbers'), ...constraints);
-  }, []); // No dependencies, relies on passed arguments
+  }, []); 
 
   const loadVipNumbers = useCallback(async (
     cursor: QueryDocumentSnapshot<DocumentData> | null = null, 
@@ -97,7 +96,7 @@ export function VipNumbersTab({ categoryMap, activeFilters }: VipNumbersTabProps
     setIsLoading(true);
     if (isRefreshOrFilterChange) {
       setIsInitialLoading(true);
-      setSearchTerm(''); // Clear search on refresh or filter change
+      setSearchTerm(''); 
     }
 
     try {
@@ -105,7 +104,7 @@ export function VipNumbersTab({ categoryMap, activeFilters }: VipNumbersTabProps
         setAllVipNumbers([]);
         setLastVisibleDoc(null);
         setFirstVisibleDoc(null);
-        setHasMore(true); // Assume more until fetch proves otherwise
+        setHasMore(true); 
       }
 
       const vipNumbersQuery = buildPageQuery(cursor, currentFilters);
@@ -116,7 +115,6 @@ export function VipNumbersTab({ categoryMap, activeFilters }: VipNumbersTabProps
         fetchedVipNumbersBatch.push({ id: docSn.id, ...docSn.data() } as VipNumber);
       });
 
-      // Client-side price filtering
       if (typeof currentFilters.minPrice === 'number' || typeof currentFilters.maxPrice === 'number') {
         fetchedVipNumbersBatch = fetchedVipNumbersBatch.filter(vip => {
           const price = vip.price;
@@ -126,9 +124,9 @@ export function VipNumbersTab({ categoryMap, activeFilters }: VipNumbersTabProps
         });
       }
       
-      if (isRefreshOrFilterChange || !cursor) { // Initial load / refresh / filter change
+      if (isRefreshOrFilterChange || !cursor) { 
         setAllVipNumbers(fetchedVipNumbersBatch);
-      } else { // Loading more
+      } else { 
         setAllVipNumbers(prevNumbers => [...prevNumbers, ...fetchedVipNumbersBatch]);
       }
       
@@ -140,7 +138,7 @@ export function VipNumbersTab({ categoryMap, activeFilters }: VipNumbersTabProps
          setFirstVisibleDoc(newFirstVisibleDoc);
       }
       
-      setHasMore(documentSnapshots.docs.length === PAGE_SIZE); // If less than PAGE_SIZE fetched, no more items for this query.
+      setHasMore(documentSnapshots.docs.length === PAGE_SIZE); 
       
     } catch (error) {
       console.error("Error fetching VIP numbers: ", error);
@@ -149,19 +147,17 @@ export function VipNumbersTab({ categoryMap, activeFilters }: VipNumbersTabProps
         description: (error as Error).message || 'Could not load VIP numbers. Check Firestore indexes for createdAt, status, categorySlug.',
         variant: 'destructive',
       });
-      setHasMore(false); // Stop further loading attempts on error
+      setHasMore(false); 
     } finally {
       setIsLoading(false);
       if (isRefreshOrFilterChange) setIsInitialLoading(false);
     }
   }, [toast, buildPageQuery, setIsLoading, setIsInitialLoading, setAllVipNumbers, setLastVisibleDoc, setFirstVisibleDoc, setHasMore, setSearchTerm ]);
 
-  // Effect for initial load AND when activeFilters change
   useEffect(() => {
-    loadVipNumbers(null, true, activeFilters); // isRefreshOrFilterChange = true
-  }, [activeFilters, loadVipNumbers]); // loadVipNumbers is memoized, this runs on activeFilters reference change
+    loadVipNumbers(null, true, activeFilters); 
+  }, [activeFilters, loadVipNumbers]); 
 
-  // Effect for client-side search filtering
   useEffect(() => {
     if (searchTerm === '') {
       setFilteredVipNumbers(allVipNumbers);
@@ -174,9 +170,8 @@ export function VipNumbersTab({ categoryMap, activeFilters }: VipNumbersTabProps
     }
   }, [searchTerm, allVipNumbers]);
 
-  // Effect for Intersection Observer - infinite scrolling
   useEffect(() => {
-    const currentObserver = observerRef.current; // Capture for cleanup
+    const currentObserver = observerRef.current; 
 
     if (isLoading || !hasMore) {
       if (currentObserver) currentObserver.disconnect();
@@ -186,7 +181,7 @@ export function VipNumbersTab({ categoryMap, activeFilters }: VipNumbersTabProps
     const observerInstance = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && lastVisibleDoc) { 
-          loadVipNumbers(lastVisibleDoc, false, activeFilters); // Pass current activeFilters
+          loadVipNumbers(lastVisibleDoc, false, activeFilters); 
         }
       },
       { threshold: 1.0 }
@@ -196,7 +191,7 @@ export function VipNumbersTab({ categoryMap, activeFilters }: VipNumbersTabProps
     if (currentLoadMoreRef) {
       observerInstance.observe(currentLoadMoreRef);
     }
-    observerRef.current = observerInstance; // Store the new observer
+    observerRef.current = observerInstance; 
 
     return () => {
       if (observerInstance) {
@@ -238,7 +233,7 @@ export function VipNumbersTab({ categoryMap, activeFilters }: VipNumbersTabProps
         title: 'VIP Number Deleted',
         description: `VIP Number "${vipNumberToDelete.number}" has been successfully deleted.`,
       });
-      loadVipNumbers(null, true, activeFilters); // Refresh all data with current filters
+      loadVipNumbers(null, true, activeFilters); 
     } catch (error) {
       console.error("Error deleting VIP Number: ", error);
       toast({
@@ -253,11 +248,11 @@ export function VipNumbersTab({ categoryMap, activeFilters }: VipNumbersTabProps
   };
 
   const onDialogSuccess = useCallback(() => {
-    loadVipNumbers(null, true, activeFilters); // Refresh all data with current filters
+    loadVipNumbers(null, true, activeFilters); 
   }, [loadVipNumbers, activeFilters]);
 
   const handleRefresh = useCallback(() => {
-    loadVipNumbers(null, true, activeFilters); // Refresh all data with current filters
+    loadVipNumbers(null, true, activeFilters); 
   }, [loadVipNumbers, activeFilters]);
 
   const displayVipNumbers = searchTerm ? filteredVipNumbers : allVipNumbers;
@@ -293,7 +288,7 @@ export function VipNumbersTab({ categoryMap, activeFilters }: VipNumbersTabProps
         </div>
       </CardHeader>
       <CardContent className="p-0">
-        <ScrollArea className="h-[60vh]"> {/* Ensure height is set for ScrollArea */}
+        <ScrollArea className="h-[60vh]"> 
           {isInitialLoading ? (
             <div className="p-6 space-y-2">
               {[...Array(Math.floor(PAGE_SIZE / 2))].map((_, i) => (
@@ -426,4 +421,3 @@ export function VipNumbersTab({ categoryMap, activeFilters }: VipNumbersTabProps
     </Card>
   );
 }
-    

@@ -45,11 +45,10 @@ export function CategoryDialog({ isOpen, onClose, category, onSuccess }: Categor
       const querySnapshot = await getDocs(q);
       if (!querySnapshot.empty) {
         const lastCategory = querySnapshot.docs[0].data();
-        // Ensure lastCategory.order is a number before adding 1
         const lastOrder = typeof lastCategory.order === 'number' ? lastCategory.order : 0;
         return lastOrder + 1;
       }
-      return 0; // Default if no categories exist
+      return 0; 
     } catch (error) {
       console.error("Error fetching max category order: ", error);
       toast({
@@ -57,25 +56,25 @@ export function CategoryDialog({ isOpen, onClose, category, onSuccess }: Categor
         description: 'Could not fetch next category order. Defaulting to 0.',
         variant: 'destructive',
       });
-      return 0; // Default on error
+      return 0; 
     }
   }, [toast]);
 
   useEffect(() => {
     const initializeForm = async () => {
-      if (category) { // Editing existing category
+      if (category) { 
         form.reset({
           title: category.title,
           slug: category.slug,
           order: category.order,
           type: category.type,
         });
-      } else { // Adding new category
+      } else { 
         setIsLoadingNextOrder(true);
         const nextOrder = await fetchNextCategoryOrder();
         form.reset({
           title: '',
-          slug: '', // Slug is mandatory but starts empty for user input or suggestion
+          slug: '', 
           order: nextOrder,
           type: 'individual',
         });
@@ -91,8 +90,7 @@ export function CategoryDialog({ isOpen, onClose, category, onSuccess }: Categor
   const handleFormSubmit = async (data: CategoryFormData) => {
     setIsSubmitting(true);
     
-    // Slug is already transformed by Zod schema using slugify(data.slug)
-    const finalSlug = data.slug; // data.slug is already slugified by the schema transform
+    const finalSlug = data.slug; 
 
     const dataToSave: Partial<CategoryFormData> & { updatedAt?: Timestamp, createdAt?: Timestamp } = {
       ...data,

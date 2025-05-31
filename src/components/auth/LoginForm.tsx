@@ -1,3 +1,4 @@
+
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -64,7 +65,7 @@ export function LoginForm() {
       if (user.email === ADMIN_EMAIL) {
         toast({
           title: 'Login Successful',
-          description: 'Welcome to NumeroDash!',
+          description: 'Welcome to NumbersGuru Admin!',
         });
         router.push('/admin/dashboard');
       } else {
@@ -97,7 +98,7 @@ export function LoginForm() {
         <CardHeader className="space-y-1 text-center">
           <div className="flex justify-center items-center gap-2">
             <Sigma className="h-8 w-8 text-primary" />
-            <CardTitle className="text-3xl font-bold">NumeroDash</CardTitle>
+            <CardTitle className="text-3xl font-bold">NumbersGuru</CardTitle>
           </div>
           <CardDescription>Admin Login</CardDescription>
         </CardHeader>

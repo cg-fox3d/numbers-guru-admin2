@@ -1,7 +1,7 @@
 
 'use client';
 
-import * as React from 'react'; // Added this import
+import * as React from 'react'; 
 import { useEffect, useState, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -60,11 +60,11 @@ export function NumberPackDialog({ isOpen, onClose, numberPack, onSuccess }: Num
         description: (error as Error).message || "Could not load categories.",
         variant: "destructive",
       });
-      setCategories([]); // Set to empty array on error
+      setCategories([]); 
     } finally {
       setIsLoadingCategories(false);
     }
-  }, [toast]); // Removed setCategories and setIsLoadingCategories as they are stable setters
+  }, [toast]); 
 
   useEffect(() => {
     if (isOpen) {
@@ -100,19 +100,18 @@ export function NumberPackDialog({ isOpen, onClose, numberPack, onSuccess }: Num
     }));
 
     const dataToSave: Partial<Omit<NumberPackFormData, 'totalOriginalPrice'>> & { 
-        totalOriginalPrice?: number | null, // Explicitly type totalOriginalPrice for saving
+        totalOriginalPrice?: number | null, 
         updatedAt: Timestamp, 
         createdAt?: Timestamp 
       } = {
       name: data.name,
       numbers: processedNumbers,
-      // packPrice removed
       status: data.status,
       categorySlug: data.categorySlug,
-      description: data.description || undefined, // ensure empty strings become undefined
+      description: data.description || undefined, 
       imageHint: data.imageHint || undefined,
       isVipPack: data.isVipPack,
-      totalOriginalPrice: data.totalOriginalPrice, // Will be auto-calculated but schema allows it
+      totalOriginalPrice: data.totalOriginalPrice, 
       updatedAt: serverTimestamp() as Timestamp,
     };
     

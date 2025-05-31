@@ -1,7 +1,7 @@
 
 'use client';
 
-import * as React from 'react'; // Added this import
+import * as React from 'react'; 
 import { useEffect, useState, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -63,11 +63,11 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
         description: (error as Error).message || "Could not load categories for the VIP Number form.",
         variant: "destructive",
       });
-      setCategories([]); // Set to empty array on error
+      setCategories([]); 
     } finally {
       setIsLoadingCategories(false);
     }
-  }, [toast]); // Removed setCategories, setIsLoadingCategories as they are stable
+  }, [toast]); 
 
 
   useEffect(() => {
@@ -114,20 +114,16 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
       let isDuplicate = false;
 
       if (vipNumber && vipNumber.id) { 
-        // Editing an existing number
-        // Only check for duplicates if the number string itself has changed
         if (processedNumber.toLowerCase() !== (vipNumber.number || '').trim().toLowerCase()) { 
           q = query(vipNumbersRef, where('number', '==', processedNumber));
           const querySnapshot = await getDocs(q);
           querySnapshot.forEach(docSnap => {
-            // A duplicate is found if another document (not the one being edited) has the same number
             if (docSnap.id !== vipNumber.id) {
               isDuplicate = true;
             }
           });
         }
       } else { 
-        // Adding a new number
         q = query(vipNumbersRef, where('number', '==', processedNumber));
         const querySnapshot = await getDocs(q);
         if (!querySnapshot.empty) {
@@ -159,7 +155,7 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
     const dataToSave: Partial<VipNumberFormData> & { updatedAt: Timestamp, createdAt?: Timestamp } = {
       ...data,
       number: processedNumber,
-      price: Math.round(Number(data.price)), // Already preprocessed by Zod, but good for explicit save
+      price: Math.round(Number(data.price)), 
       originalPrice: data.originalPrice !== null && data.originalPrice !== undefined ? Math.round(Number(data.originalPrice)) : undefined,
       discount: data.discount !== null && data.discount !== undefined ? Number(data.discount) : undefined,
       description: data.description || undefined,
@@ -169,7 +165,7 @@ export function VipNumberDialog({ isOpen, onClose, vipNumber, onSuccess }: VipNu
     
     Object.keys(dataToSave).forEach(keyStr => {
       const key = keyStr as keyof typeof dataToSave;
-      if (dataToSave[key] === undefined) { // Remove undefined fields explicitly
+      if (dataToSave[key] === undefined) { 
         delete (dataToSave as any)[key];
       }
     });

@@ -61,13 +61,11 @@ export default function CategoriesPage() {
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Filter input states
   const [filterType, setFilterType] = useState<string>('');
   const [filterDateFrom, setFilterDateFrom] = useState<Date | undefined>(undefined);
   const [filterDateTo, setFilterDateTo] = useState<Date | undefined>(undefined);
   const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
   
-  // Applied filters
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>({});
 
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -151,13 +149,11 @@ export default function CategoriesPage() {
     }
   }, [toast, buildBaseQuery, setIsLoading, setIsInitialLoading, setAllCategories, setLastVisibleDoc, setFirstVisibleDoc, setHasMore]);
 
-  // Effect for initial load AND when activeFilters change
   useEffect(() => {
-    setSearchTerm(''); // Clear client-side search when filters change
-    fetchCategories(null, true, activeFilters); // isRefreshOrFilterChange = true
+    setSearchTerm(''); 
+    fetchCategories(null, true, activeFilters); 
   }, [activeFilters, fetchCategories]);
 
-  // Client-side search filtering on accumulated data
   useEffect(() => {
     if (searchTerm === '') {
       setFilteredCategories(allCategories);
@@ -171,7 +167,6 @@ export default function CategoriesPage() {
     }
   }, [searchTerm, allCategories]);
 
-  // Intersection Observer for infinite scroll
   useEffect(() => {
     const currentObserver = observerRef.current;
     const currentLoadMoreRef = loadMoreRef.current;
@@ -184,7 +179,7 @@ export default function CategoriesPage() {
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && lastVisibleDoc) {
-          fetchCategories(lastVisibleDoc, false, activeFilters); // Pass current activeFilters
+          fetchCategories(lastVisibleDoc, false, activeFilters); 
         }
       },
       { threshold: 1.0 }
@@ -234,7 +229,7 @@ export default function CategoriesPage() {
         title: 'Category Deleted',
         description: `Category "${categoryToDelete.title}" has been successfully deleted.`,
       });
-      fetchCategories(null, true, activeFilters); // Refresh all data with current filters
+      fetchCategories(null, true, activeFilters); 
     } catch (error) {
       console.error("Error deleting category: ", error);
       toast({
@@ -249,12 +244,12 @@ export default function CategoriesPage() {
   };
   
   const onDialogSuccess = useCallback(() => {
-    fetchCategories(null, true, activeFilters); // Refresh all data with current filters
+    fetchCategories(null, true, activeFilters); 
   }, [fetchCategories, activeFilters]);
 
   const handleRefresh = useCallback(() => {
-    setSearchTerm(''); // Clear client search
-    fetchCategories(null, true, activeFilters); // Refresh with current active filters
+    setSearchTerm(''); 
+    fetchCategories(null, true, activeFilters); 
   }, [fetchCategories, activeFilters]);
 
 
@@ -264,7 +259,7 @@ export default function CategoriesPage() {
     if (filterDateFrom) newActiveFilters.dateFrom = filterDateFrom;
     if (filterDateTo) newActiveFilters.dateTo = filterDateTo;
     
-    setActiveFilters(newActiveFilters); // This will trigger the useEffect for fetchCategories
+    setActiveFilters(newActiveFilters); 
     setIsFilterPopoverOpen(false);
   };
 
@@ -272,11 +267,11 @@ export default function CategoriesPage() {
     setFilterType('');
     setFilterDateFrom(undefined);
     setFilterDateTo(undefined);
-    setActiveFilters({}); // This will trigger the useEffect for fetchCategories
+    setActiveFilters({}); 
     setIsFilterPopoverOpen(false);
   };
 
-  const displayCategories = filteredCategories; // Use client-side filtered list for display
+  const displayCategories = filteredCategories; 
 
   const getActiveFilterCount = () => {
     return Object.values(activeFilters).filter(v => v !== undefined && v !== '').length;
@@ -390,7 +385,7 @@ export default function CategoriesPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
-            <ScrollArea className="h-[60vh]"> {/* Ensure height is set for ScrollArea */}
+            <ScrollArea className="h-[60vh]"> 
               {isInitialLoading && allCategories.length === 0 ? (
                 <div className="p-6 space-y-2">
                   {[...Array(Math.floor(PAGE_SIZE / 2))].map((_, i) => ( 
@@ -513,6 +508,3 @@ export default function CategoriesPage() {
     </>
   );
 }
-    
-
-    

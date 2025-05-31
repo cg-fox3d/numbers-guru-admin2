@@ -39,7 +39,7 @@ export function SidebarNav() {
       <div className="flex items-center gap-2 px-2 py-4 group-data-[collapsible=icon]:justify-center">
         <Sigma className="h-7 w-7 text-primary flex-shrink-0" />
         <h1 className="text-xl font-semibold text-sidebar-foreground group-data-[collapsible=icon]:hidden">
-          NumeroDash
+          NumbersGuru
         </h1>
       </div>
       <SidebarMenu className="flex-1 px-2">

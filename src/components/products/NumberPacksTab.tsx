@@ -37,8 +37,6 @@ interface NumberPacksTabProps {
 const PAGE_SIZE = 10;
 
 export function NumberPacksTab({ categoryMap, activeFilters }: NumberPacksTabProps) {
-  console.log(`[NumberPacksTab] Rendering. Received activeFilters:`, JSON.stringify(activeFilters));
-
   const [allNumberPacks, setAllNumberPacks] = useState<NumberPack[]>([]);
   const [filteredNumberPacks, setFilteredNumberPacks] = useState<NumberPack[]>([]);
   
@@ -61,7 +59,6 @@ export function NumberPacksTab({ categoryMap, activeFilters }: NumberPacksTabPro
   
   const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null, currentFilters: ProductActiveFilters) => {
     const constraints: QueryConstraint[] = [];
-    console.log('[NumberPacksTab] buildPageQuery: Applying filters for query:', currentFilters);
 
     if (currentFilters.status) {
       constraints.push(where('status', '==', currentFilters.status));
@@ -85,7 +82,6 @@ export function NumberPacksTab({ categoryMap, activeFilters }: NumberPacksTabPro
       constraints.push(startAfter(cursor));
     }
     constraints.push(limit(PAGE_SIZE));
-    console.log('[NumberPacksTab] buildPageQuery: Firestore query constraints:', constraints);
     return query(collection(db, 'numberPacks'), ...constraints);
   }, []);
 
@@ -94,22 +90,18 @@ export function NumberPacksTab({ categoryMap, activeFilters }: NumberPacksTabPro
     isRefreshOrFilterChange = false,
     filtersForThisFetch: ProductActiveFilters
   ) => {
-    console.log(`[NumberPacksTab] fetchNumberPacks called. Cursor: ${cursor ? 'exists' : 'null'}, isRefreshOrFilterChange: ${isRefreshOrFilterChange}`);
-    if (isLoading && !isRefreshOrFilterChange) { // Prevent concurrent non-refresh fetches
-        console.log("[NumberPacksTab] fetchNumberPacks: Already loading and not a refresh, returning.");
+    if (isLoading && !isRefreshOrFilterChange) { 
         return;
     }
     
     setIsLoading(true);
     if (isRefreshOrFilterChange) {
-      console.log("[NumberPacksTab] fetchNumberPacks: Refresh/Filter change triggered. Setting isInitialLoading=true.");
       setIsInitialLoading(true);
       setSearchTerm('');
     }
 
     try {
       if (isRefreshOrFilterChange) {
-        console.log("[NumberPacksTab] fetchNumberPacks: Resetting allNumberPacks, lastVisibleDoc, firstVisibleDoc, hasMore due to refresh/filter change.");
         setAllNumberPacks([]);
         setLastVisibleDoc(null);
         setFirstVisibleDoc(null);
@@ -117,34 +109,27 @@ export function NumberPacksTab({ categoryMap, activeFilters }: NumberPacksTabPro
       }
 
       const packsQuery = buildPageQuery(cursor, filtersForThisFetch);
-      console.log("[NumberPacksTab] fetchNumberPacks: Executing Firestore query.");
       const documentSnapshots = await getDocs(packsQuery);
-      console.log(`[NumberPacksTab] fetchNumberPacks: Firestore query returned ${documentSnapshots.docs.length} documents.`);
       
       let fetchedPacksBatch: NumberPack[] = [];
       documentSnapshots.docs.forEach((docSn) => {
         fetchedPacksBatch.push({ id: docSn.id, ...docSn.data() } as NumberPack);
       });
 
-      // Client-side price filtering (if minPrice or maxPrice is set in filtersForThisFetch)
       if (typeof filtersForThisFetch.minPrice === 'number' || typeof filtersForThisFetch.maxPrice === 'number') {
-        const originalBatchSize = fetchedPacksBatch.length;
         fetchedPacksBatch = fetchedPacksBatch.filter(pack => {
-          const price = pack.totalOriginalPrice ?? 0; // Use totalOriginalPrice
+          const price = pack.totalOriginalPrice ?? 0; 
           const meetsMin = typeof filtersForThisFetch.minPrice === 'number' ? price >= filtersForThisFetch.minPrice : true;
           const meetsMax = typeof filtersForThisFetch.maxPrice === 'number' ? price <= filtersForThisFetch.maxPrice : true;
           return meetsMin && meetsMax;
         });
-        console.log(`[NumberPacksTab] fetchNumberPacks: Client-side price filter applied. Before: ${originalBatchSize}, After: ${fetchedPacksBatch.length}`);
       }
       
       if (isRefreshOrFilterChange || !cursor) {
         setAllNumberPacks(fetchedPacksBatch);
-        console.log("[NumberPacksTab] fetchNumberPacks: Initial load/refresh. All packs set:", fetchedPacksBatch.length);
       } else {
         setAllNumberPacks(prevPacks => {
           const newPacks = [...prevPacks, ...fetchedPacksBatch];
-          console.log(`[NumberPacksTab] fetchNumberPacks: Appending packs. Prev count: ${prevPacks.length}, New batch count: ${fetchedPacksBatch.length}, Total: ${newPacks.length}`);
           return newPacks;
         });
       }
@@ -158,10 +143,9 @@ export function NumberPacksTab({ categoryMap, activeFilters }: NumberPacksTabPro
       }
       
       setHasMore(documentSnapshots.docs.length === PAGE_SIZE);
-      console.log(`[NumberPacksTab] fetchNumberPacks: Updated lastVisibleDoc: ${newLastVisibleDoc ? 'exists' : 'null'}, hasMore: ${documentSnapshots.docs.length === PAGE_SIZE}`);
       
     } catch (error) {
-      console.error("[NumberPacksTab] Error fetching number packs: ", error);
+      console.error("Error fetching number packs: ", error);
       toast({
         title: 'Error Fetching Number Packs',
         description: (error as Error).message || 'Could not load number packs. Check Firestore indexes and console for errors.',
@@ -172,16 +156,12 @@ export function NumberPacksTab({ categoryMap, activeFilters }: NumberPacksTabPro
       setIsLoading(false);
       if (isRefreshOrFilterChange) {
         setIsInitialLoading(false);
-        console.log("[NumberPacksTab] fetchNumberPacks: Refresh/Filter change finished. isInitialLoading=false, isLoading=false.");
-      } else {
-         console.log("[NumberPacksTab] fetchNumberPacks: Load more finished. isLoading=false.");
       }
     }
   },
-  [ // Dependencies for fetchNumberPacks
+  [ 
     toast, 
     buildPageQuery, 
-    // Stable setters:
     setIsLoading, 
     setIsInitialLoading, 
     setAllNumberPacks, 
@@ -192,15 +172,11 @@ export function NumberPacksTab({ categoryMap, activeFilters }: NumberPacksTabPro
   ]
 );
 
-  // Effect for initial load AND when activeFilters (from props) change
   useEffect(() => {
-    console.log(`[NumberPacksTab] useEffect for activeFilters change. New activeFilters:`, JSON.stringify(activeFilters));
-    fetchNumberPacks(null, true, activeFilters); // isRefreshOrFilterChange = true, pass current activeFilters
+    fetchNumberPacks(null, true, activeFilters); 
   }, [activeFilters, fetchNumberPacks]);
 
-  // Effect for client-side search filtering
   useEffect(() => {
-    console.log(`[NumberPacksTab] useEffect for searchTerm or allNumberPacks change. SearchTerm: "${searchTerm}"`);
     if (searchTerm === '') {
       setFilteredNumberPacks(allNumberPacks);
     } else {
@@ -210,31 +186,25 @@ export function NumberPacksTab({ categoryMap, activeFilters }: NumberPacksTabPro
       );
       setFilteredNumberPacks(filteredData);
     }
-    console.log(`[NumberPacksTab] filteredNumberPacks count: ${filteredNumberPacks.length}`);
   }, [searchTerm, allNumberPacks]);
 
-  // Effect for Intersection Observer - infinite scrolling
   useEffect(() => {
     const currentObserver = observerRef.current;
     const currentLoadMoreRef = loadMoreRef.current;
 
     if (!currentLoadMoreRef) {
-      console.log("[NumberPacksTab] IntersectionObserver useEffect: loadMoreRef.current is null, returning.");
       return;
     }
 
     if (isLoading || !hasMore) {
-      console.log(`[NumberPacksTab] IntersectionObserver useEffect: Not observing. isLoading: ${isLoading}, hasMore: ${hasMore}`);
       if (currentObserver) currentObserver.unobserve(currentLoadMoreRef);
       return;
     }
-    console.log("[NumberPacksTab] IntersectionObserver useEffect: Setting up observer.");
 
     const observerInstance = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && lastVisibleDoc) { 
-          console.log("[NumberPacksTab] IntersectionObserver: Sentinel intersected! Loading more packs.");
-          fetchNumberPacks(lastVisibleDoc, false, activeFilters); // Pass current activeFilters from props
+          fetchNumberPacks(lastVisibleDoc, false, activeFilters); 
         }
       },
       { threshold: 1.0 }
@@ -244,7 +214,6 @@ export function NumberPacksTab({ categoryMap, activeFilters }: NumberPacksTabPro
     observerRef.current = observerInstance;
 
     return () => {
-      console.log("[NumberPacksTab] IntersectionObserver useEffect: Cleaning up observer.");
       if (observerInstance && currentLoadMoreRef) {
         observerInstance.unobserve(currentLoadMoreRef);
       }
@@ -284,7 +253,6 @@ export function NumberPacksTab({ categoryMap, activeFilters }: NumberPacksTabPro
         title: 'Number Pack Deleted',
         description: `Pack "${numberPackToDelete.name}" has been successfully deleted.`,
       });
-      // Refresh the list to reflect the deletion
       fetchNumberPacks(null, true, activeFilters);
     } catch (error) {
       console.error("Error deleting Number Pack: ", error);
@@ -300,12 +268,10 @@ export function NumberPacksTab({ categoryMap, activeFilters }: NumberPacksTabPro
   };
 
   const onDialogSuccess = useCallback(() => {
-    // Refresh the list after successful add/edit
     fetchNumberPacks(null, true, activeFilters);
   }, [fetchNumberPacks, activeFilters]);
 
   const handleRefresh = useCallback(() => {
-    console.log("[NumberPacksTab] handleRefresh called.");
     fetchNumberPacks(null, true, activeFilters);
   }, [fetchNumberPacks, activeFilters]);
 
@@ -342,7 +308,6 @@ export function NumberPacksTab({ categoryMap, activeFilters }: NumberPacksTabPro
         </div>
       </CardHeader>
       <CardContent className="p-0">
-        {/* Ensure ScrollArea has a defined height for infinite scroll to work */}
         <ScrollArea className="h-[60vh]"> 
           {isInitialLoading && displayNumberPacks.length === 0 ? (
             <div className="p-6 space-y-2">

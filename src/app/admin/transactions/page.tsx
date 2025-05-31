@@ -34,8 +34,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 
 const PAGE_SIZE = 10;
-const TRANSACTION_STATUSES = ["captured", "pending", "failed", "authorized", "created", "refunded"]; // Added refunded for completeness
-const TRANSACTION_METHODS = ["card", "wallet", "upi", "netbanking", "emi", "bank_transfer"]; // Added bank_transfer
+const TRANSACTION_STATUSES = ["captured", "pending", "failed", "authorized", "created", "refunded"]; 
+const TRANSACTION_METHODS = ["card", "wallet", "upi", "netbanking", "emi", "bank_transfer"]; 
 
 interface ActiveFilters {
   status?: string;
@@ -66,14 +66,12 @@ export default function TransactionsPage() {
   const [transactionToDelete, setTransactionToDelete] = useState<Transaction | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Filter input states
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [filterDateFrom, setFilterDateFrom] = useState<Date | undefined>(undefined);
   const [filterDateTo, setFilterDateTo] = useState<Date | undefined>(undefined);
   const [filterMethod, setFilterMethod] = useState<string>('');
   const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
   
-  // Applied filters
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>({});
 
   const buildPageQuery = useCallback((cursor: QueryDocumentSnapshot<DocumentData> | null, currentActiveFilters: ActiveFilters): QueryConstraint[] => {
@@ -152,12 +150,10 @@ export default function TransactionsPage() {
     }
   }, [toast, buildPageQuery, setIsLoading, setIsInitialLoading, setAllTransactions, setLastVisibleDoc, setFirstVisibleDoc, setHasMore, setSearchTerm ]);
 
-  // Effect for initial load AND when activeFilters change
   useEffect(() => {
-    fetchTransactions(null, true, activeFilters); // isRefreshOrFilterChange = true
+    fetchTransactions(null, true, activeFilters); 
   }, [activeFilters, fetchTransactions]);
 
-  // Client-side search filtering
   useEffect(() => {
     const lowercasedSearch = searchTerm.toLowerCase();
     if (searchTerm === '') {
@@ -173,7 +169,6 @@ export default function TransactionsPage() {
     }
   }, [searchTerm, allTransactions]);
 
-  // Intersection Observer for infinite scroll
   useEffect(() => {
     const currentObserver = observerRef.current;
     const currentLoadMoreRef = loadMoreRef.current;
@@ -233,12 +228,7 @@ export default function TransactionsPage() {
         title: 'Transaction Deleted',
         description: `Transaction "${transactionToDelete.paymentId}" has been successfully deleted.`,
       });
-      // Optimistic update and refetch if needed
       setAllTransactions(prev => prev.filter(tx => tx.id !== transactionToDelete.id));
-      if (allTransactions.length -1 < PAGE_SIZE && !hasMore && (allTransactions.length -1 > 0) ) {
-        // Potentially refetch if current view might become sparse or user expects it.
-        // For now, rely on optimistic update.
-      }
     } catch (error) {
       console.error("Error deleting transaction: ", error);
       toast({
@@ -250,7 +240,7 @@ export default function TransactionsPage() {
       setIsDeleting(false);
       closeDeleteConfirmDialog();
     }
-  }, [transactionToDelete, toast, closeDeleteConfirmDialog, allTransactions.length, hasMore]);
+  }, [transactionToDelete, toast, closeDeleteConfirmDialog]);
 
 
   const formatCurrency = (amount?: number, currencyCode: string = "INR") => {
@@ -273,7 +263,7 @@ export default function TransactionsPage() {
     if (filterDateFrom) newActiveFilters.dateFrom = filterDateFrom;
     if (filterDateTo) newActiveFilters.dateTo = filterDateTo;
     
-    setActiveFilters(newActiveFilters); // This will trigger the useEffect for fetchTransactions
+    setActiveFilters(newActiveFilters); 
     setIsFilterPopoverOpen(false);
   };
 
@@ -516,4 +506,3 @@ export default function TransactionsPage() {
     </>
   );
 }
-
