@@ -235,7 +235,7 @@ export function DashboardOverview() {
             <Link href="/admin/customers" className="flex items-center text-primary hover:underline">
               <Users className="mr-2 h-4 w-4" /> Customer List
             </Link>
-            <Link href="https://numbersguru.com" target="_blank" rel="noopener noreferrer" className="flex items-center text-primary hover:underline">
+            <Link href="https://varshavipnumbers.in" target="_blank" rel="noopener noreferrer" className="flex items-center text-primary hover:underline">
               <ExternalLink className="mr-2 h-4 w-4" /> Main Site
             </Link>
           </CardContent>

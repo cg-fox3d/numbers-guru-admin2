@@ -64,7 +64,7 @@ export function SidebarNav() {
       </SidebarMenu>
        <SidebarMenu className="mt-auto px-2 pb-2">
         <SidebarMenuItem>
-           <Link href="https://numbersguru.com" target="_blank" rel="noopener noreferrer">
+           <Link href="https://varshavipnumbers.in" target="_blank" rel="noopener noreferrer">
             <SidebarMenuButton className="text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" tooltip={{children: "Main Site", className: "bg-popover text-popover-foreground border shadow-md"}}>
               <ExternalLink />
               <span>Main Site</span>
