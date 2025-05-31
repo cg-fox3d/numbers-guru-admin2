@@ -9,20 +9,10 @@ export const loginSchema = z.object({
 
 export const categorySchema = z.object({
   title: z.string().min(3, { message: 'Category title must be at least 3 characters.' }),
-  slug: z.string().optional().transform((val, ctx) => {
-    if (val && val.trim() !== '') {
-      return slugify(val);
-    }
-    // If title is available, generate slug from title
-    const title = ctx.originalInput?.title;
-    if (title && typeof title === 'string' && title.trim() !== '') {
-      return slugify(title);
-    }
-    return val; // Return original val if no title to derive from
-  }),
+  slug: z.string().min(1, { message: "Slug is required." }).transform(slugify),
   order: z.preprocess(
-    (val) => (typeof val === 'string' && val.trim() !== '' ? parseInt(val, 10) : (typeof val === 'number' ? val : 0)),
-    z.number().min(0, { message: 'Order must be a non-negative number.' })
+    (val) => (typeof val === 'string' && val.trim() !== '' ? parseInt(val, 10) : val),
+    z.number({ required_error: "Order is required.", invalid_type_error: "Order must be a number." }).min(0, { message: 'Order must be a non-negative integer.' }).int({message: "Order must be an integer."})
   ),
   type: z.enum(['individual', 'pack'], { required_error: 'Category type is required.' }),
 });

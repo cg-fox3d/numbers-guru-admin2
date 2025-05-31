@@ -1,34 +1,36 @@
 
 'use client';
 
-import * as React from 'react'; // Added this import
+import * as React from 'react'; 
 import { useEffect, useState, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Skeleton } from '@/components/ui/skeleton';
 import { CategoryForm } from '@/components/categories/CategoryForm';
 import type { Category, CategoryFormData } from '@/types';
 import { categorySchema } from '@/lib/schemas';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, doc, updateDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, serverTimestamp, Timestamp, query, orderBy, limit, getDocs } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { slugify } from '@/lib/utils';
 
 interface CategoryDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  category?: Category | null; // Existing category for editing
-  onSuccess?: () => void; // Callback on successful save
+  category?: Category | null; 
+  onSuccess?: () => void; 
 }
 
 export function CategoryDialog({ isOpen, onClose, category, onSuccess }: CategoryDialogProps) {
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingNextOrder, setIsLoadingNextOrder] = useState(false);
 
   const defaultFormValuesRef = React.useRef<CategoryFormData>({
     title: '',
     slug: '',
-    order: 0,
+    order: 0, 
     type: 'individual',
   });
 
@@ -37,39 +39,65 @@ export function CategoryDialog({ isOpen, onClose, category, onSuccess }: Categor
     defaultValues: defaultFormValuesRef.current,
   });
 
+  const fetchNextCategoryOrder = useCallback(async (): Promise<number> => {
+    try {
+      const q = query(collection(db, 'categories'), orderBy('order', 'desc'), limit(1));
+      const querySnapshot = await getDocs(q);
+      if (!querySnapshot.empty) {
+        const lastCategory = querySnapshot.docs[0].data();
+        // Ensure lastCategory.order is a number before adding 1
+        const lastOrder = typeof lastCategory.order === 'number' ? lastCategory.order : 0;
+        return lastOrder + 1;
+      }
+      return 0; // Default if no categories exist
+    } catch (error) {
+      console.error("Error fetching max category order: ", error);
+      toast({
+        title: 'Error',
+        description: 'Could not fetch next category order. Defaulting to 0.',
+        variant: 'destructive',
+      });
+      return 0; // Default on error
+    }
+  }, [toast]);
+
   useEffect(() => {
-    if (isOpen) { // Reset form when dialog opens
-      if (category) {
+    const initializeForm = async () => {
+      if (category) { // Editing existing category
         form.reset({
           title: category.title,
           slug: category.slug,
           order: category.order,
           type: category.type,
         });
-      } else {
-        form.reset(defaultFormValuesRef.current);
+      } else { // Adding new category
+        setIsLoadingNextOrder(true);
+        const nextOrder = await fetchNextCategoryOrder();
+        form.reset({
+          title: '',
+          slug: '', // Slug is mandatory but starts empty for user input or suggestion
+          order: nextOrder,
+          type: 'individual',
+        });
+        setIsLoadingNextOrder(false);
       }
+    };
+
+    if (isOpen) {
+      initializeForm();
     }
-  }, [category, form, isOpen]);
+  }, [category, form, isOpen, fetchNextCategoryOrder]);
 
   const handleFormSubmit = async (data: CategoryFormData) => {
     setIsSubmitting(true);
     
-    const finalSlug = (data.slug && data.slug.trim() !== '') ? slugify(data.slug) : slugify(data.title);
-    if (!finalSlug) {
-        toast({
-            title: 'Validation Error',
-            description: 'Title or slug is required to generate a valid slug.',
-            variant: 'destructive',
-        });
-        setIsSubmitting(false);
-        return;
-    }
+    // Slug is already transformed by Zod schema using slugify(data.slug)
+    const finalSlug = data.slug; // data.slug is already slugified by the schema transform
 
     const dataToSave: Partial<CategoryFormData> & { updatedAt?: Timestamp, createdAt?: Timestamp } = {
       ...data,
       slug: finalSlug,
-      order: Number(data.order) // Ensure order is a number
+      order: Number(data.order) 
     };
 
     try {
@@ -83,7 +111,7 @@ export function CategoryDialog({ isOpen, onClose, category, onSuccess }: Categor
         });
       } else {
         dataToSave.createdAt = serverTimestamp() as Timestamp;
-        dataToSave.updatedAt = serverTimestamp() as Timestamp; // Also set updatedAt on creation
+        dataToSave.updatedAt = serverTimestamp() as Timestamp; 
         await addDoc(collection(db, 'categories'), dataToSave);
         toast({
           title: 'Category Added',
@@ -110,7 +138,7 @@ export function CategoryDialog({ isOpen, onClose, category, onSuccess }: Categor
     }
   }, [onClose]);
 
-  if (!isOpen && !category) return null; 
+  if (!isOpen && !category && !isLoadingNextOrder) return null; 
 
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
@@ -121,12 +149,21 @@ export function CategoryDialog({ isOpen, onClose, category, onSuccess }: Categor
             {category ? 'Update the details of this category.' : 'Fill in the details for the new category.'}
           </DialogDescription>
         </DialogHeader>
-        <CategoryForm
-          form={form}
-          onSubmit={handleFormSubmit}
-          isSubmitting={isSubmitting}
-          onClose={onClose} 
-        />
+        {isLoadingNextOrder && !category ? (
+            <div className="space-y-4 py-4">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-1/2" />
+                <Skeleton className="h-10 w-full mt-2" />
+            </div>
+        ) : (
+            <CategoryForm
+                form={form}
+                onSubmit={handleFormSubmit}
+                isSubmitting={isSubmitting || (isLoadingNextOrder && !category)}
+                onClose={onClose} 
+            />
+        )}
       </DialogContent>
     </Dialog>
   );

@@ -20,7 +20,7 @@ export function CategoryForm({ form, onSubmit, isSubmitting, onClose }: Category
   const watchTitle = form.watch('title');
 
   const handleSlugSuggestion = () => {
-    if (watchTitle && (!form.getValues('slug') || form.getValues('slug')?.trim() === '')) {
+    if (watchTitle) {
       form.setValue('slug', slugify(watchTitle), { shouldValidate: true });
     }
   };
@@ -47,16 +47,16 @@ export function CategoryForm({ form, onSubmit, isSubmitting, onClose }: Category
           name="slug"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Slug (Optional)</FormLabel>
+              <FormLabel>Slug</FormLabel>
               <div className="flex items-center gap-2">
                 <FormControl>
                   <Input placeholder="e.g., fancy-numbers" {...field} />
                 </FormControl>
-                <Button type="button" variant="outline" size="sm" onClick={handleSlugSuggestion} disabled={!watchTitle}>
+                <Button type="button" variant="outline" size="sm" onClick={handleSlugSuggestion} disabled={!watchTitle || isSubmitting}>
                   Suggest
                 </Button>
               </div>
-              <FormDescription>If left empty, a slug will be generated from the title.</FormDescription>
+              <FormDescription>Slug must be unique and will be auto-formatted.</FormDescription>
               <FormMessage />
             </FormItem>
           )}
@@ -69,9 +69,9 @@ export function CategoryForm({ form, onSubmit, isSubmitting, onClose }: Category
             <FormItem>
               <FormLabel>Order</FormLabel>
               <FormControl>
-                <Input type="number" placeholder="0" {...field} onChange={e => field.onChange(parseInt(e.target.value, 10) || 0)} />
+                <Input type="number" placeholder="e.g., 0" {...field} onChange={e => field.onChange(parseInt(e.target.value, 10))} />
               </FormControl>
-              <FormDescription>Determines the display order of categories.</FormDescription>
+              <FormDescription>Determines the display order of categories. Should be unique.</FormDescription>
               <FormMessage />
             </FormItem>
           )}
