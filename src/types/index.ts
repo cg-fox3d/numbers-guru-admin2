@@ -141,9 +141,14 @@ export interface Refund {
 
 export interface DashboardStats {
   totalRevenue: number;
-  newCustomers: number; 
+  newCustomersThisMonth: number; 
   ordersThisMonth: number;
-  productsInStock: number;
+  vipNumbersInStock: number;
+  numberPacksInStock: number;
+  totalCustomers: number;
+  totalOrders: number;
+  totalRefunds: number;
+  monthlyOrdersData: { month: string; orders: number }[];
 }
 
 export interface ProductActiveFilters {
